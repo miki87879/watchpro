@@ -18,9 +18,13 @@ RUN npm run build
 # ══════════════════════════════════════════════════════════════
 FROM python:3.11-slim
 
-# System deps for fpdf2 Hebrew fonts (none extra needed — fonts are embedded)
+# System deps: curl + lxml compilation libs + fonts
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    gcc \
+    libxml2-dev \
+    libxslt1-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
