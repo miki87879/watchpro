@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+body {
+  background-color: #0a0e1a;
+  color: #f0f0f0;
+  font-family: 'Inter', sans-serif;
+  margin: 0;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #111827;
+}
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d4af37;
+}
+
+.gold-gradient {
+  background: linear-gradient(135deg, #d4af37, #f5d76e);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.card {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.btn-gold {
+  background: linear-gradient(135deg, #d4af37, #b8962e);
+  color: #0a0e1a;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.btn-gold:hover {
+  opacity: 0.9;
+}
+
+.status-available { color: #10b981; background: rgba(16,185,129,0.1); }
+.status-sold { color: #ef4444; background: rgba(239,68,68,0.1); }
+.status-reserved { color: #f59e0b; background: rgba(245,158,11,0.1); }

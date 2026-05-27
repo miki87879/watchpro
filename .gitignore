@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.env
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.env.local
+
+# Database (don't commit prod data)
+*.sqlite
+*.db
+
+# Uploads (user files)
+backend/uploads/
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Railway / Docker
+.dockerignore

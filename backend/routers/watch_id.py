@@ -1,0 +1,362 @@
+"""
+Watch Identifier & Appraiser
+POST /api/watch-id/identify   – JSON body  { query, serial, image_base64 }
+POST /api/watch-id/from-image – multipart file upload
+"""
+
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
+from pydantic import BaseModel
+from typing import Optional
+import os, base64, json, re, asyncio
+import anthropic
+import models
+from routers.auth import get_current_user_optional
+
+router = APIRouter()
+
+def _log(action, resource="", details=None, user=None, success=True):
+    try:
+        from routers.logs import log_action
+        log_action(action=action, resource=resource, details=details, user=user, success=success)
+    except Exception:
+        pass
+
+# ─── Rolex serial → approximate year ────────────────────────────────────────
+ROLEX_SERIAL_RANGES = [
+    # (prefix_letter_or_range, year)  — letter-based post-1987 serials
+    # Pre-1987 numeric ranges (approximate midpoints)
+    ((       1,   10000), 1926), ((   10000,   20000), 1930), ((   20000,   30000), 1932),
+    ((   30000,   40000), 1934), ((   40000,   50000), 1935), ((   50000,   70000), 1936),
+    ((   70000,  100000), 1937), ((  100000,  150000), 1938), ((  150000,  200000), 1939),
+    ((  200000,  250000), 1940), ((  250000,  310000), 1942), ((  310000,  370000), 1944),
+    ((  370000,  450000), 1946), ((  450000,  550000), 1948), ((  550000,  650000), 1950),
+    ((  650000,  780000), 1952), ((  780000,  920000), 1954), ((  920000, 1100000), 1956),
+    ((1100000, 1300000), 1958), ((1300000, 1500000), 1960), ((1500000, 1700000), 1962),
+    ((1700000, 1900000), 1964), ((1900000, 2100000), 1966), ((2100000, 2300000), 1968),
+    ((2300000, 2700000), 1970), ((2700000, 3300000), 1972), ((3300000, 3900000), 1974),
+    ((3900000, 4700000), 1976), ((4700000, 5700000), 1978), ((5700000, 6700000), 1980),
+    ((6700000, 7900000), 1982), ((7900000, 9100000), 1984), ((9100000, 9999999), 1986),
+]
+
+ROLEX_LETTER_YEARS = {
+    "R": 1987, "L": 1988, "E": 1989, "X": 1990, "N": 1991,
+    "C": 1992, "S": 1993, "W": 1994, "T": 1995, "U": 1996,
+    "A": 1997, "P": 1998, "K": 1999, "Y": 2000, "F": 2001,
+    "D": 2002, "Z": 2003, "M": 2004, "V": 2005, "G": 2006,
+    "B": 2007,
+    # Post-2010 random serials starting with digits: no reliable table
+}
+
+# Two-letter prefix post-2010 random serials
+ROLEX_2LETTER_YEARS = {
+    "OD": 2010, "PE": 2010, "OE": 2011, "PF": 2011, "OF": 2012, "PG": 2012,
+    "OG": 2013, "PH": 2013, "OH": 2014, "PI": 2014, "OI": 2015, "PJ": 2015,
+    "LK": 2016, "MK": 2016, "NK": 2016, "0K": 2016,
+    "1P": 2017, "2P": 2017, "3P": 2017, "4P": 2018, "5P": 2018, "6P": 2018,
+    "7R": 2019, "8R": 2019, "9R": 2019,
+}
+
+def decode_rolex_serial(serial: str) -> Optional[int]:
+    if not serial:
+        return None
+    s = serial.strip().upper().replace(" ", "").replace("-", "")
+    if not s:
+        return None
+
+    # Two-letter prefix (random serial era 2010+)
+    if len(s) >= 2 and not s[:2].isdigit():
+        prefix2 = s[:2]
+        if prefix2 in ROLEX_2LETTER_YEARS:
+            return ROLEX_2LETTER_YEARS[prefix2]
+
+    # Single letter prefix (1987-2009)
+    if s[0].isalpha():
+        return ROLEX_LETTER_YEARS.get(s[0])
+
+    # Pure numeric (pre-1987)
+    digits = re.sub(r"\D", "", s)
+    if digits:
+        try:
+            num = int(digits)
+            for (lo, hi), year in ROLEX_SERIAL_RANGES:
+                if lo <= num < hi:
+                    return year
+        except ValueError:
+            pass
+    return None
+
+
+# ─── Pydantic models ─────────────────────────────────────────────────────────
+class IdentifyRequest(BaseModel):
+    query: Optional[str] = None
+    serial: Optional[str] = None
+    image_base64: Optional[str] = None
+
+
+# ─── Claude prompt ───────────────────────────────────────────────────────────
+SYSTEM_PROMPT = """You are WatchGPT — the world's most precise luxury watch expert, appraiser, and market analyst.
+You have encyclopaedic, fact-checked knowledge of every watch brand, model, reference number, movement caliber, production run dates, factory pricing, and secondary-market transaction history as of mid-2025.
+
+ACCURACY RULES (non-negotiable):
+1. Reference numbers, caliber numbers, dimensions, and retail prices must be factually exact — never approximate or fabricated.
+2. Market values must reflect actual completed transactions (WatchCharts, Chrono24, Bob's, WatchBox data), not estimates.
+3. If you are less than 90% certain of a technical spec, omit that field (return null) rather than guess.
+4. investment_grade must follow this rubric:
+   A+ = Consistent 5%+ annual appreciation + high liquidity (Patek 5711, Rolex Daytona, AP 15202)
+   A  = Stable premium + reliable resale (Rolex Sub, GMT, Explorer, AP 15500, Omega Moonwatch)
+   B  = Holds retail value ±10% over 3 years
+   C  = Depreciates 10-25% from retail
+   D  = Depreciates >25% or illiquid
+5. confidence must reflect identification certainty (0.0–1.0). With reference number: 0.97–0.99. With image only: 0.70–0.90.
+
+CRITICAL LANGUAGE RULE: All text fields in the JSON must be written in fluent, natural Hebrew (עברית).
+- Brand names, model names, reference numbers, caliber names stay as-is (Rolex, Submariner, 126610LN, Calibre 3235).
+- Enum values stay as-is: price_trend ("rising"/"stable"/"falling"), investment_grade (A+/A/B/C/D).
+- Every other string field MUST be in Hebrew: case_material, dial_description, investment_reasoning,
+  authentication_tips, red_flags, collector_notes, availability, historical_significance,
+  box_papers_premium, best_time_to_buy, price_trend_note, similar_models[].note, movement, crystal,
+  bracelet, clasp, dial_color, bezel.
+
+Respond with ONLY valid JSON, no prose, no markdown fences. Schema:
+{
+  "brand": string,
+  "model": string,
+  "reference": string,
+  "nickname": string|null,
+  "confidence": float,
+  "year_introduced": int|null,
+  "still_in_production": bool|null,
+  "serial_year": int|null,
+  "case_material": string(Hebrew)|null,
+  "case_size_mm": number|null,
+  "case_thickness_mm": number|null,
+  "lug_width_mm": number|null,
+  "movement": string(Hebrew)|null,
+  "power_reserve_hours": number|null,
+  "water_resistance_m": number|null,
+  "crystal": string(Hebrew)|null,
+  "bracelet": string(Hebrew)|null,
+  "clasp": string(Hebrew)|null,
+  "dial_color": string(Hebrew)|null,
+  "dial_description": string(Hebrew)|null,
+  "bezel": string(Hebrew)|null,
+  "retail_price_usd": number|null,
+  "market_values": {
+    "mint_full_set": number|null,
+    "excellent_with_papers": number|null,
+    "excellent_no_papers": number|null,
+    "good": number|null,
+    "fair": number|null
+  },
+  "investment_grade": "A+"|"A"|"B"|"C"|"D",
+  "investment_reasoning": string(Hebrew),
+  "price_trend": "rising"|"stable"|"falling",
+  "price_trend_note": string(Hebrew),
+  "best_time_to_buy": string(Hebrew),
+  "authentication_tips": [string(Hebrew)],
+  "red_flags": [string(Hebrew)],
+  "similar_models": [{"reference": string, "nickname": string|null, "note": string(Hebrew)}],
+  "collector_notes": string(Hebrew),
+  "availability": string(Hebrew),
+  "historical_significance": string(Hebrew),
+  "box_papers_premium": string(Hebrew)
+}"""
+
+
+def build_user_message(query: Optional[str], serial: Optional[str],
+                       serial_year: Optional[int], image_base64: Optional[str]) -> list:
+    parts = []
+
+    text_lines = [
+        "זהה והעריך שעון יוקרה זה. ענה אך ורק ב-JSON תקין בעברית.",
+        "חשוב: כל שדות הטקסט (הסברים, טיפים, הערות) יהיו בעברית תקינה ומלאה.",
+    ]
+    if query:
+        text_lines.append(f"שם/רפרנס השעון: {query}")
+    if serial:
+        text_lines.append(f"מספר סידורי: {serial}")
+    if serial_year:
+        text_lines.append(f"שנת ייצור משוערת (לפי מספר סידורי Rolex): כ-{serial_year}")
+    if image_base64:
+        text_lines.append("תמונת השעון מצורפת — השתמש בה לזיהוי מדויק.")
+
+    text_block = {"type": "text", "text": "\n".join(text_lines)}
+    parts.append(text_block)
+
+    if image_base64:
+        # Strip data URL prefix if present
+        b64 = image_base64
+        media_type = "image/jpeg"
+        if "," in b64:
+            header, b64 = b64.split(",", 1)
+            if "png" in header:
+                media_type = "image/png"
+            elif "webp" in header:
+                media_type = "image/webp"
+            elif "gif" in header:
+                media_type = "image/gif"
+        parts.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": b64,
+            },
+        })
+
+    return parts
+
+
+def _parse_claude_response(raw_text: str) -> dict:
+    raw_text = raw_text.strip()
+    # Strip markdown code fences if Claude wrapped the JSON anyway
+    if raw_text.startswith("```"):
+        raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+        raw_text = re.sub(r"\s*```$", "", raw_text)
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", raw_text, re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group())
+            except Exception:
+                pass
+        raise HTTPException(
+            status_code=422,
+            detail=f"Claude returned non-JSON response: {raw_text[:300]}",
+        )
+
+
+async def call_claude(content: list) -> dict:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
+
+    def _sync_call():
+        client = anthropic.Anthropic(api_key=api_key)
+        return client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": content}],
+        )
+
+    # Run blocking Anthropic call in a thread so the event loop stays free
+    response = await asyncio.to_thread(_sync_call)
+    return _parse_claude_response(response.content[0].text)
+
+
+# ─── Endpoints ───────────────────────────────────────────────────────────────
+
+@router.post("/watch-id/identify")
+async def identify_watch(body: IdentifyRequest):
+    if not body.query and not body.serial and not body.image_base64:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of 'query', 'serial', or 'image_base64' is required",
+        )
+
+    serial_year: Optional[int] = None
+    if body.serial:
+        serial_year = decode_rolex_serial(body.serial)
+
+    content = build_user_message(body.query, body.serial, serial_year, body.image_base64)
+    result = await call_claude(content)
+
+    # Inject our decoded serial_year if Claude left it null
+    if serial_year and not result.get("serial_year"):
+        result["serial_year"] = serial_year
+
+    _log("WATCH_IDENTIFY", body.query or body.serial or "image", {"brand": result.get("brand"), "model": result.get("model")})
+    return result
+
+
+# ─── Quick-fill endpoint (Haiku — fast & cheap) ──────────────────────────────
+QUICK_FILL_SYSTEM = """You are a luxury watch database. Given a reference number or model name, return a compact JSON with just the fields needed to pre-fill an inventory form. Be fast and precise.
+
+Respond ONLY with valid JSON (no markdown):
+{
+  "brand": string,
+  "model": string,
+  "reference": string,
+  "year_introduced": int|null,
+  "case_material": string,
+  "movement": string,
+  "water_resistance_m": number|null,
+  "retail_price_usd": number|null,
+  "market_value_excellent": number|null,
+  "dial_description": string,
+  "brief_notes": string
+}
+All text fields in Hebrew except brand/model/reference names."""
+
+@router.post("/watch-id/quick-fill")
+async def quick_fill(body: IdentifyRequest):
+    """Lightweight auto-fill for AddWatch form. Uses Haiku (fast & cheap)."""
+    if not body.query and not body.serial:
+        raise HTTPException(status_code=400, detail="query or serial required")
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
+
+    serial_year: Optional[int] = None
+    if body.serial:
+        serial_year = decode_rolex_serial(body.serial)
+
+    lines = []
+    if body.query:
+        lines.append(f"Reference/Model: {body.query}")
+    if body.serial:
+        lines.append(f"Serial: {body.serial}")
+    if serial_year:
+        lines.append(f"Approx. year (Rolex serial decode): {serial_year}")
+    prompt = "\n".join(lines)
+
+    def _sync():
+        client = anthropic.Anthropic(api_key=api_key)
+        return client.messages.create(
+            model="claude-haiku-4-5",   # ← Haiku: ~5s, ~50x cheaper than Sonnet
+            max_tokens=600,
+            system=QUICK_FILL_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+    response = await asyncio.to_thread(_sync)
+    result = _parse_claude_response(response.content[0].text)
+    if serial_year and not result.get("year_introduced"):
+        result["year_introduced"] = serial_year
+    return result
+
+
+@router.post("/watch-id/from-image")
+async def identify_from_image(file: UploadFile = File(...)):
+    allowed = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    if file.content_type not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {file.content_type}. Use JPEG, PNG, WebP or GIF.",
+        )
+
+    raw_bytes = await file.read()
+    if len(raw_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image too large. Maximum 10 MB.")
+
+    b64 = base64.b64encode(raw_bytes).decode()
+    media_type = file.content_type or "image/jpeg"
+
+    content = [
+        {"type": "text", "text": "זהה והעריך שעון יוקרה זה מהתמונה. ענה אך ורק ב-JSON תקין. כל שדות הטקסט יהיו בעברית תקינה ומלאה."},
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": b64,
+            },
+        },
+    ]
+
+    result = await call_claude(content)
+    return result
