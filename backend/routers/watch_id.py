@@ -126,20 +126,17 @@ SYSTEM_PROMPT = """You are WatchGPT — an elite luxury watch expert, appraiser,
 • Unknown reference → 0.55–0.75, explain in collector_notes.
 • Name/free-text → 0.80–0.95. Image only → 0.65–0.90. Serial only → 0.40–0.70.
 
-━━━ YEAR & VARIANT FIELDS ━━━
-production_year_range: "YYYY–YYYY" or "YYYY–present".
-year_significance_note: Hebrew, 2-3 sentences — which production years/sub-variants are most valuable and why.
-known_variants_by_year: Hebrew — key year-specific variants (dial, caliber, bezel). Null if single-variant modern watch.
-
 ━━━ LANGUAGE ━━━
-ALL text fields in Hebrew (עברית). Brand/model names, reference numbers, calibers, and enums (rising/stable/falling, A+/A/B/C/D) stay as-is.
+ALL text fields in Hebrew (עברית). Brand/model names, reference numbers, calibers, and enums stay as-is.
 
-━━━ BREVITY (critical for speed) ━━━
-• Text fields: maximum 2 sentences each.
-• Arrays (authentication_tips, red_flags, similar_models): maximum 3 items each.
-• Do NOT pad with generic phrases — be specific and concise.
+━━━ STRICT BREVITY — response budget is 1000 tokens total ━━━
+• Every text field: EXACTLY 1 short sentence (under 20 Hebrew words). No exceptions.
+• authentication_tips, red_flags: exactly 2 items each, no more.
+• similar_models: exactly 2 items, each note under 10 Hebrew words.
+• year_significance_note and known_variants_by_year: 1 sentence or null.
+• Do NOT pad with generic phrases. Be specific and ultra-concise.
 
-Respond with ONLY valid JSON, no prose, no markdown fences. Schema:
+Respond with ONLY valid JSON (no markdown). Schema — include ALL fields, even if null:
 {
   "brand": string,
   "model": string,
@@ -149,45 +146,38 @@ Respond with ONLY valid JSON, no prose, no markdown fences. Schema:
   "year_introduced": int|null,
   "still_in_production": bool|null,
   "serial_year": int|null,
-  "case_material": string(Hebrew)|null,
+  "case_material": string|null,
   "case_size_mm": number|null,
   "case_thickness_mm": number|null,
   "lug_width_mm": number|null,
-  "movement": string(Hebrew)|null,
+  "movement": string|null,
   "power_reserve_hours": number|null,
   "water_resistance_m": number|null,
-  "crystal": string(Hebrew)|null,
-  "bracelet": string(Hebrew)|null,
-  "clasp": string(Hebrew)|null,
-  "dial_color": string(Hebrew)|null,
-  "dial_description": string(Hebrew)|null,
-  "bezel": string(Hebrew)|null,
+  "crystal": string|null,
+  "bracelet": string|null,
+  "clasp": string|null,
+  "dial_color": string|null,
+  "dial_description": string|null,
+  "bezel": string|null,
   "retail_price_usd": number|null,
-  "market_values": {
-    "mint_full_set": number|null,
-    "excellent_with_papers": number|null,
-    "excellent_no_papers": number|null,
-    "good": number|null,
-    "fair": number|null
-  },
+  "market_values": {"mint_full_set":number|null,"excellent_with_papers":number|null,"excellent_no_papers":number|null,"good":number|null,"fair":number|null},
   "investment_grade": "A+"|"A"|"B"|"C"|"D",
-  "investment_reasoning": string(Hebrew),
+  "investment_reasoning": string,
   "price_trend": "rising"|"stable"|"falling",
-  "price_trend_note": string(Hebrew),
-  "best_time_to_buy": string(Hebrew),
-  "authentication_tips": [string(Hebrew)],
-  "red_flags": [string(Hebrew)],
-  "similar_models": [{"reference": string, "nickname": string|null, "note": string(Hebrew)}],
-  "collector_notes": string(Hebrew),
-  "availability": string(Hebrew),
-  "historical_significance": string(Hebrew),
-  "box_papers_premium": string(Hebrew),
+  "price_trend_note": string,
+  "best_time_to_buy": string,
+  "authentication_tips": [string, string],
+  "red_flags": [string, string],
+  "similar_models": [{"reference":string,"nickname":string|null,"note":string},{"reference":string,"nickname":string|null,"note":string}],
+  "collector_notes": string,
+  "availability": string,
+  "historical_significance": string,
+  "box_papers_premium": string,
   "reference_image_url": string|null,
   "production_year_range": string|null,
-  "year_significance_note": string(Hebrew)|null,
-  "known_variants_by_year": string(Hebrew)|null
-}
-IMPORTANT — reference_image_url: Provide a direct publicly-accessible image URL of this exact watch reference (e.g. from Wikimedia Commons, manufacturer press kit, or Hodinkee). Must be a real, working .jpg/.png URL. Set null if uncertain."""
+  "year_significance_note": string|null,
+  "known_variants_by_year": string|null
+}"""
 
 
 def build_user_message(query: Optional[str], serial: Optional[str],
@@ -288,12 +278,11 @@ async def call_claude(content: list, *, retries: int = 2) -> dict:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
 
     def _sync_call():
-        # Use Haiku (5-7× faster than Sonnet). Sonnet was taking 60-100s → timeout.
-        # If haiku-4-5 doesn't exist we fall back below.
-        client = anthropic.Anthropic(api_key=api_key, timeout=45.0)
+        # Haiku = faster than Sonnet. Strict 1000-token schema keeps response short.
+        client = anthropic.Anthropic(api_key=api_key, timeout=55.0)
         return client.messages.create(
             model="claude-haiku-4-5",
-            max_tokens=1800,
+            max_tokens=1200,          # schema fits in ~800-1000 tokens with brevity rules
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content}],
         )
@@ -301,10 +290,9 @@ async def call_claude(content: list, *, retries: int = 2) -> dict:
     last_exc = None
     for attempt in range(retries + 1):
         try:
-            # asyncio.wait_for gives us a Python-level deadline as safety net
             response = await asyncio.wait_for(
                 asyncio.to_thread(_sync_call),
-                timeout=48.0,
+                timeout=58.0,          # safety net below Railway's 60s gateway timeout
             )
             if not response.content:
                 raise ValueError("Empty response from Claude")
