@@ -62,6 +62,14 @@ function readMktCache(key: string): MarketData | null {
 function writeMktCache(key: string, data: MarketData) {
   try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })) } catch {}
 }
+function clearAllMktCache() {
+  const keys: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)
+    if (k && k.startsWith('mkt_')) keys.push(k)
+  }
+  keys.forEach(k => localStorage.removeItem(k))
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const GOLD = '#d4af37'
@@ -847,10 +855,14 @@ export default function WatchIdentifier() {
               <button
                 onClick={() => result && fetchLiveMarket(result.brand, result.model, result.reference, true)}
                 disabled={liveMarket.loading}
-                className="p-1.5 rounded-lg transition-all hover:bg-green-900/30"
-                title="רענן מחירים"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all font-medium text-xs"
+                style={liveMarket.data?.from_cache
+                  ? { background: 'rgba(34,197,94,0.2)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.4)' }
+                  : { background: 'rgba(34,197,94,0.08)', color: '#4b7a5e', border: '1px solid rgba(34,197,94,0.15)' }}
+                title="רענן מחירים מהשוק"
               >
-                <RefreshCw size={14} color="#4b7a5e" className={liveMarket.loading ? 'animate-spin' : ''} />
+                <RefreshCw size={13} className={liveMarket.loading ? 'animate-spin' : ''} />
+                {liveMarket.data?.from_cache ? 'רענן' : '🔄'}
               </button>
             </div>
 
@@ -1355,8 +1367,18 @@ export default function WatchIdentifier() {
             </button>
           </div>
 
-          {/* Clear cache link */}
-          <div className="flex justify-end pt-1">
+          {/* Clear cache links */}
+          <div className="flex justify-end gap-4 pt-1">
+            <button
+              onClick={() => {
+                clearAllMktCache()
+                if (result) fetchLiveMarket(result.brand, result.model, result.reference, true)
+              }}
+              className="text-xs transition-all hover:opacity-80"
+              style={{ color: '#4b5563', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              נקה cache מחירים
+            </button>
             <button
               onClick={() => {
                 clearWatchCache()

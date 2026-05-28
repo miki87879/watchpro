@@ -980,6 +980,19 @@ async def get_market_prices(brand: str, model: str, reference: str = ""):
     return result_data
 
 
+@router.delete("/watch-id/market-prices/cache")
+async def clear_market_cache(brand: str = "", model: str = "", reference: str = ""):
+    """Clear server-side market price cache.
+    Pass brand+model+reference to clear a single entry; call with no params to wipe all."""
+    if brand or model or reference:
+        key = f"{brand}|{model}|{reference}".lower()
+        removed = _mkt_cache.pop(key, None)
+        return {"cleared": 1 if removed else 0, "key": key}
+    count = len(_mkt_cache)
+    _mkt_cache.clear()
+    return {"cleared": count}
+
+
 # ─── Quick-fill endpoint ─────────────────────────────────────────────────────
 QUICK_FILL_SYSTEM = """You are a luxury watch reference database. Given a reference number, return a compact JSON to pre-fill an inventory form. Accuracy is CRITICAL — never guess or hallucinate model names.
 
