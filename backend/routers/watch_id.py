@@ -435,7 +435,9 @@ async def identify_watch(body: IdentifyRequest):
         serial_year = decode_rolex_serial(effective_serial)
 
     content = build_user_message(effective_query, effective_serial, serial_year, body.image_base64, body.query_type)
-    result = await call_claude(content)
+    # retries=0: one attempt only (48s timeout). User clicks "נסה שוב" if it fails.
+    # Multiple retries would total 144s+ and always hit the gateway timeout.
+    result = await call_claude(content, retries=0)
 
     # Inject our decoded serial_year if Claude left it null
     if serial_year and not result.get("serial_year"):
