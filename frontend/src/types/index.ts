@@ -42,6 +42,17 @@ export interface Watch {
   primary_photo?: string
   photos?: WatchPhoto[]
   documents?: WatchDocument[]
+  // Tax refund (purchased abroad — tourist VAT refund)
+  tax_refund?: boolean
+  tax_refund_amount?: number
+  tax_refund_currency?: string
+  tax_refund_country?: string
+  // Import customs/duty paid in Israel
+  import_tax?: number
+  import_tax_currency?: string
+  // Physical location of the watch
+  location?: string
+  location_details?: string
 }
 
 export interface Contact {
