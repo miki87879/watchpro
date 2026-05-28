@@ -368,7 +368,14 @@ export default function WatchDetail() {
                     </div>
                     {(watch.tax_refund || (watch.import_tax ?? 0) > 0) && (
                       <div className="text-xs text-gray-500 mt-0.5">
-                        ברוטו: {fmtPrice(watch.purchase_price, watch.price_currency)}
+                        ברוטו:{' '}
+                        {watch.purchase_rate_to_ils
+                          ? ilsToSelected(
+                              watch.purchase_price * watch.purchase_rate_to_ils,
+                              watch.price_currency,
+                              watch.purchase_rate_to_ils,
+                            )
+                          : fmtPrice(watch.purchase_price, watch.price_currency)}
                       </div>
                     )}
                   </>
