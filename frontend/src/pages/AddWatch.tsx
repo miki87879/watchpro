@@ -128,6 +128,7 @@ export default function AddWatch() {
   // Historical ILS rate preview
   const [ilsRate, setIlsRate] = useState<{ rate: number; date: string; source: string } | null>(null)
   const [ilsRateLoading, setIlsRateLoading] = useState(false)
+  const [ilsRateError, setIlsRateError] = useState(false)
 
   // Document upload state
   const [docFiles, setDocFiles] = useState<DocFile[]>([])
@@ -200,20 +201,32 @@ export default function AddWatch() {
 
     if (!date || !currency || currency === 'ILS' || !price || price <= 0) {
       setIlsRate(null)
+      setIlsRateError(false)
       return
     }
 
     let cancelled = false
     setIlsRateLoading(true)
+    setIlsRate(null)
+    setIlsRateError(false)
     api.get('/api/currency/historical', { params: { currency, date } })
       .then((res) => {
-        if (!cancelled && res.data.rate_to_ils) {
-          setIlsRate({ rate: res.data.rate_to_ils, date: res.data.date, source: res.data.source })
-        } else if (!cancelled) {
-          setIlsRate(null)
+        if (!cancelled) {
+          if (res.data.rate_to_ils) {
+            setIlsRate({ rate: res.data.rate_to_ils, date: res.data.date, source: res.data.source })
+            setIlsRateError(false)
+          } else {
+            setIlsRate(null)
+            setIlsRateError(true)
+          }
         }
       })
-      .catch(() => { if (!cancelled) setIlsRate(null) })
+      .catch(() => {
+        if (!cancelled) {
+          setIlsRate(null)
+          setIlsRateError(true)
+        }
+      })
       .finally(() => { if (!cancelled) setIlsRateLoading(false) })
 
     return () => { cancelled = true }
@@ -936,24 +949,27 @@ export default function AddWatch() {
               </div>
             </div>
 
-            {/* Historical ILS rate preview */}
-            {(ilsRateLoading || ilsRate) && form.price_currency !== 'ILS' && form.purchase_price && form.purchase_date && (
+            {/* Historical ILS rate preview — always show when price+date+non-ILS currency are filled */}
+            {form.price_currency !== 'ILS' && !!form.purchase_price && parseFloat(form.purchase_price) > 0 && !!form.purchase_date && (
               <div
                 className="rounded-xl p-4 flex items-center gap-3"
-                style={{ background: 'rgba(212,175,55,0.07)', border: '1px solid rgba(212,175,55,0.25)' }}
+                style={{
+                  background: ilsRateError ? 'rgba(239,68,68,0.05)' : 'rgba(212,175,55,0.07)',
+                  border: `1px solid ${ilsRateError ? 'rgba(239,68,68,0.25)' : 'rgba(212,175,55,0.25)'}`,
+                }}
               >
-                <span style={{ fontSize: 20 }}>📅</span>
+                <span style={{ fontSize: 20 }}>{ilsRateError ? '⚠️' : '📅'}</span>
                 {ilsRateLoading ? (
                   <div className="flex items-center gap-2">
                     <Loader2 size={14} className="animate-spin" style={{ color: '#d4af37' }} />
-                    <span className="text-xs" style={{ color: '#9ca3af' }}>שולף שער היסטורי...</span>
+                    <span className="text-xs" style={{ color: '#9ca3af' }}>שולף שער היסטורי ל-{form.purchase_date}...</span>
                   </div>
                 ) : ilsRate ? (
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
                       <span className="text-xs" style={{ color: '#9ca3af' }}>
-                        שער ב-{new Date(ilsRate.date).toLocaleDateString('he-IL', { day: 'numeric', month: 'long', year: 'numeric' })}
-                        {ilsRate.source === 'latest' && <span className="mr-1 text-xs" style={{ color: '#f59e0b' }}>(שער נוכחי)</span>}
+                        שער {form.price_currency}/₪ ב-{new Date(ilsRate.date + 'T12:00:00').toLocaleDateString('he-IL', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        {ilsRate.source === 'latest' && <span className="mr-1 text-xs" style={{ color: '#f59e0b' }}> (שער נוכחי)</span>}
                       </span>
                       <span className="text-xs font-mono" style={{ color: '#d4af37' }}>
                         1 {form.price_currency} = ₪{ilsRate.rate.toFixed(4)}
@@ -966,6 +982,8 @@ export default function AddWatch() {
                       </span>
                     </div>
                   </div>
+                ) : ilsRateError ? (
+                  <span className="text-xs" style={{ color: '#9ca3af' }}>לא ניתן לשלוף שער היסטורי עבור {form.purchase_date}</span>
                 ) : null}
               </div>
             )}
