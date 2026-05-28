@@ -938,7 +938,7 @@ async def get_market_prices(brand: str, model: str, reference: str = ""):
             _ebay_sold(client, ebay_query, brand, model),
             _ebay_active_api(client, ebay_query, brand, model),
             _chrono24_listings(client, broad_query, brand, model),
-            _marktplaats_listings(client, broad_query, brand, model),
+            # Marktplaats removed — category IDs returned aquarium equipment instead of watches
             _reddit_prices(client, broad_query, brand, model),
         ]
         raw = await asyncio.gather(*tasks, return_exceptions=True)

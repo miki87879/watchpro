@@ -446,6 +446,9 @@ export default function WatchIdentifier() {
         setLiveMarket({ loading: false, data: { ...cached, from_cache: true }, error: null })
         return
       }
+    } else {
+      // Explicitly delete the localStorage entry so stale data cannot reappear
+      try { localStorage.removeItem(key) } catch {}
     }
     setLiveMarket({ loading: true, data: null, error: null })
     const apiBase = import.meta.env.VITE_API_URL ?? ''
