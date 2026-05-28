@@ -7,6 +7,7 @@ import os
 import uuid
 import aiofiles
 import shutil
+import httpx
 
 from database import get_db
 import models
@@ -24,6 +25,48 @@ def _log(action, resource="", details=None, user=None, success=True):
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PHOTOS_DIR = os.path.join(BASE_DIR, "uploads", "photos")
 DOCS_DIR = os.path.join(BASE_DIR, "uploads", "documents")
+
+
+# ─── Historical exchange-rate helper ─────────────────────────────────────────
+def _fetch_ils_rate(currency: str, date_obj: Optional[datetime]) -> Optional[float]:
+    """
+    Return 1 {currency} = ? ILS on the given date.
+    Uses fawazahmed0/exchange-api (free, historical, no API key, includes ILS).
+    Falls back to latest rate if historical date unavailable.
+    Returns None only when the network call fully fails.
+    """
+    if not currency or currency == "ILS":
+        return 1.0
+
+    cur = currency.lower()
+    date_str = (date_obj or datetime.utcnow()).strftime("%Y-%m-%d")
+
+    # Attempt 1 — historical rate for exact date
+    for url in [
+        f"https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@{date_str}/v1/currencies/{cur}.json",
+        f"https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/{cur}.json",
+    ]:
+        try:
+            with httpx.Client(timeout=8.0) as client:
+                r = client.get(url)
+            if r.status_code == 200:
+                rate = r.json().get(cur, {}).get("ils")
+                if rate:
+                    return float(rate)
+        except Exception:
+            continue
+
+    return None
+
+
+def _update_ils_fields(watch: "models.Watch") -> None:
+    """Fetch historical ILS rate for watch's purchase date/currency and persist on the watch object."""
+    if not watch.purchase_price or watch.purchase_price <= 0:
+        return
+    rate = _fetch_ils_rate(watch.price_currency or "USD", watch.purchase_date)
+    if rate is not None:
+        watch.purchase_rate_to_ils = round(rate, 4)
+        watch.purchase_price_ils = round(watch.purchase_price * rate, 2)
 
 def watch_to_dict(watch: models.Watch, include_relations: bool = False) -> dict:
     primary_photo = None
@@ -65,6 +108,9 @@ def watch_to_dict(watch: models.Watch, include_relations: bool = False) -> dict:
         # Location
         "location": watch.location or "home_safe",
         "location_details": watch.location_details,
+        # Historical rate at purchase
+        "purchase_price_ils": watch.purchase_price_ils,
+        "purchase_rate_to_ils": watch.purchase_rate_to_ils,
     }
 
     if include_relations:
@@ -174,6 +220,9 @@ def create_watch(
         location=location,
         location_details=location_details,
     )
+    # Fetch historical ILS rate before first commit
+    _update_ils_fields(watch)
+
     db.add(watch)
     db.commit()
     db.refresh(watch)
@@ -275,6 +324,13 @@ def update_watch(
             watch.purchase_date = datetime.fromisoformat(purchase_date)
         except Exception:
             pass
+
+    # Re-fetch ILS rate if any price/date/currency field changed
+    price_fields_changed = any(x is not None for x in [
+        purchase_price, price_currency, purchase_date
+    ])
+    if price_fields_changed:
+        _update_ils_fields(watch)
 
     db.commit()
     db.refresh(watch)
@@ -450,3 +506,41 @@ def update_status(
 def get_brands(db: Session = Depends(get_db)):
     brands = db.query(models.Watch.brand).distinct().all()
     return [b[0] for b in brands]
+
+
+@router.post("/inventory/{watch_id}/refresh-rate")
+def refresh_ils_rate(
+    watch_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Re-fetch historical ILS rate for a single watch (e.g., for legacy entries)."""
+    watch = db.query(models.Watch).filter(models.Watch.id == watch_id).first()
+    if not watch:
+        raise HTTPException(status_code=404, detail="Watch not found")
+    _update_ils_fields(watch)
+    db.commit()
+    db.refresh(watch)
+    return {
+        "purchase_rate_to_ils": watch.purchase_rate_to_ils,
+        "purchase_price_ils": watch.purchase_price_ils,
+    }
+
+
+@router.post("/inventory/refresh-all-rates")
+def refresh_all_ils_rates(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Backfill historical ILS rates for all watches that are missing them."""
+    watches = db.query(models.Watch).filter(
+        models.Watch.purchase_price > 0,
+        models.Watch.purchase_price_ils.is_(None),
+    ).all()
+    updated = 0
+    for watch in watches:
+        _update_ils_fields(watch)
+        if watch.purchase_price_ils is not None:
+            updated += 1
+    db.commit()
+    return {"updated": updated, "total": len(watches)}

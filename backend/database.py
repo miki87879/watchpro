@@ -34,6 +34,8 @@ def migrate_watches_table():
         ("import_tax_currency", "VARCHAR(10) DEFAULT 'ILS'"),
         ("location",            "VARCHAR(50) DEFAULT 'home_safe'"),
         ("location_details",    "VARCHAR(200)"),
+        ("purchase_price_ils",  "FLOAT"),
+        ("purchase_rate_to_ils","FLOAT"),
     ]
     with engine.connect() as conn:
         result = conn.execute(text("PRAGMA table_info(watches)"))

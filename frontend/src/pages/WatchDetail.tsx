@@ -92,6 +92,15 @@ export default function WatchDetail() {
     } catch { toast.error('שגיאה במחיקת מסמך') }
   }
 
+  const refreshIlsRate = async () => {
+    if (!id) return
+    try {
+      const res = await api.post(`/api/inventory/${id}/refresh-rate`)
+      setWatch(prev => prev ? { ...prev, purchase_price_ils: res.data.purchase_price_ils, purchase_rate_to_ils: res.data.purchase_rate_to_ils } : prev)
+      toast.success('שער עודכן בהצלחה')
+    } catch { toast.error('לא ניתן לשלוף שער') }
+  }
+
   const deleteWatch = async () => {
     if (!id || !confirm('האם למחוק את השעון?')) return
     try {
@@ -317,6 +326,47 @@ export default function WatchDetail() {
                 <span className="text-sm font-bold" style={{ color: profit >= 0 ? '#10b981' : '#ef4444' }}>
                   {profit >= 0 ? '+' : ''}${profit.toLocaleString()}
                 </span>
+              </div>
+            )}
+
+            {/* Historical ILS rate at purchase */}
+            {watch.purchase_price_ils != null && watch.purchase_rate_to_ils != null && (
+              <div
+                className="mt-3 rounded-xl p-4 space-y-2"
+                style={{ background: 'rgba(212,175,55,0.06)', border: '1px solid rgba(212,175,55,0.2)' }}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <span style={{ color: '#d4af37', fontSize: 13 }}>📅</span>
+                    <span className="text-xs font-semibold" style={{ color: '#d4af37' }}>
+                      שער המטבע ביום הרכישה
+                      {watch.purchase_date && (
+                        <span className="font-normal" style={{ color: '#9ca3af' }}>
+                          {' '}({new Date(watch.purchase_date).toLocaleDateString('he-IL', { day:'numeric', month:'long', year:'numeric' })})
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <button
+                    onClick={refreshIlsRate}
+                    className="text-xs px-2 py-0.5 rounded-lg transition-all hover:opacity-80"
+                    style={{ background: 'rgba(212,175,55,0.15)', color: '#d4af37', border: '1px solid rgba(212,175,55,0.3)' }}
+                  >
+                    רענן שער
+                  </button>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">שער</span>
+                  <span className="text-sm font-semibold text-white">
+                    1 {watch.price_currency || 'USD'} = ₪{watch.purchase_rate_to_ils.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">מחיר קנייה בשקלים</span>
+                  <span className="text-base font-bold" style={{ color: '#d4af37' }}>
+                    ₪{Math.round(watch.purchase_price_ils).toLocaleString('he-IL')}
+                  </span>
+                </div>
               </div>
             )}
           </div>

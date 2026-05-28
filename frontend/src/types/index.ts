@@ -53,6 +53,9 @@ export interface Watch {
   // Physical location of the watch
   location?: string
   location_details?: string
+  // Historical exchange rate at time of purchase
+  purchase_price_ils?: number       // purchase price converted to ILS on purchase_date
+  purchase_rate_to_ils?: number     // 1 {price_currency} = X ILS on purchase_date
 }
 
 export interface Contact {

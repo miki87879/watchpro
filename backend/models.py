@@ -65,6 +65,9 @@ class Watch(Base):
     # Physical location of the watch
     location = Column(String(50), default="home_safe")   # "home_safe" | "other"
     location_details = Column(String(200))
+    # Historical exchange rate at time of purchase (cached)
+    purchase_price_ils = Column(Float)        # purchase_price converted to ILS on purchase_date
+    purchase_rate_to_ils = Column(Float)      # 1 {price_currency} = X ILS on purchase_date
     photos = relationship("WatchPhoto", back_populates="watch", cascade="all, delete-orphan")
     documents = relationship("WatchDocument", back_populates="watch", cascade="all, delete-orphan")
 
