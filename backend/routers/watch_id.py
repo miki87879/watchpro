@@ -225,8 +225,10 @@ Respond with ONLY valid JSON, no prose, no markdown fences. Schema:
   "collector_notes": string(Hebrew),
   "availability": string(Hebrew),
   "historical_significance": string(Hebrew),
-  "box_papers_premium": string(Hebrew)
-}"""
+  "box_papers_premium": string(Hebrew),
+  "reference_image_url": string|null
+}
+IMPORTANT — reference_image_url: Provide a direct publicly-accessible image URL of this exact watch reference (e.g. from Wikimedia Commons, manufacturer press kit, or Hodinkee). Must be a real, working .jpg/.png URL. Set null if uncertain."""
 
 
 def build_user_message(query: Optional[str], serial: Optional[str],

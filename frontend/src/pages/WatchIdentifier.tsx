@@ -219,14 +219,31 @@ function generateReport(result: WatchResult, imagePreview: string | null): void 
     ${result.historical_significance}
   </div>` : ''}` : ''}
 
-  <div class="footer">
+  <div style="margin-top:32px;text-align:center;">
+    <button onclick="window.print()" style="background:#d4af37;color:#0a0e1a;border:none;padding:10px 28px;border-radius:8px;font-size:0.9rem;font-weight:bold;cursor:pointer;">
+      🖨️ הדפס / שמור כ-PDF
+    </button>
+  </div>
+  <div class="footer" style="margin-top:16px;">
     נוצר על-ידי Watch Pro · ${new Date().toLocaleDateString('he-IL')}
   </div>
 </body>
 </html>`
 
   const blob = new Blob([html], { type: 'text/html' })
-  window.open(URL.createObjectURL(blob), '_blank')
+  const url = URL.createObjectURL(blob)
+
+  // Open in new tab for preview + trigger download
+  window.open(url, '_blank')
+
+  // Also trigger file download
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${result.brand}-${result.model}-${result.reference}.html`.replace(/\s+/g, '-')
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -561,17 +578,27 @@ export default function WatchIdentifier() {
               </div>
             )}
 
+            {/* Watch image — full width above text when available */}
+            {(displayImage || result.reference_image_url) && (
+              <div className="mb-4 flex justify-center">
+                <img
+                  src={displayImage ?? result.reference_image_url!}
+                  alt={`${result.brand} ${result.model}`}
+                  className="rounded-xl object-contain"
+                  style={{
+                    maxHeight: 240,
+                    maxWidth: '100%',
+                    border: `1px solid ${BORDER}`,
+                    background: '#0d1117',
+                  }}
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
+              </div>
+            )}
+
             <div className="flex flex-wrap items-start justify-between gap-4">
-              {/* Watch image (feature 1) + brand/model text */}
+              {/* Brand/model text */}
               <div className="flex items-start gap-4 flex-1">
-                {displayImage && (
-                  <img
-                    src={displayImage}
-                    alt={`${result.brand} ${result.model}`}
-                    className="rounded-xl object-cover flex-shrink-0"
-                    style={{ width: 80, height: 80, border: `1px solid ${BORDER}` }}
-                  />
-                )}
                 <div className="space-y-1 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-2xl font-bold" style={{ color: GOLD }}>

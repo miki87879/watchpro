@@ -49,6 +49,7 @@ export interface WatchResult {
   availability: string
   historical_significance: string
   box_papers_premium: string
+  reference_image_url: string | null
 }
 
 // ─── Cache helpers ─────────────────────────────────────────────────────────────
