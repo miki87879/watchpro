@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowRight, Edit, Trash2, Watch, Upload, X, Download,
   FileText, DollarSign, Calendar, Tag, Box, ScrollText,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Calculator,
 } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
 import toast from 'react-hot-toast'
 import api from '../api/client'
 import { Watch as WatchType } from '../types'
+import { useCurrency } from '../context/CurrencyContext'
 
 const statusLabel: Record<string, string> = { available: 'זמין', sold: 'נמכר', reserved: 'שמור' }
 
@@ -29,6 +30,7 @@ const conditionLabel: Record<string, string> = { mint: 'מושלם', excellent: 
 export default function WatchDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { rates } = useCurrency()
   const [watch, setWatch] = useState<WatchType | null>(null)
   const [loading, setLoading] = useState(true)
   const [photoIdx, setPhotoIdx] = useState(0)
@@ -36,6 +38,8 @@ export default function WatchDetail() {
   const [soldPrice, setSoldPrice] = useState('')
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [uploadingDoc, setUploadingDoc] = useState(false)
+  // System documents (global doc library, linked by watch_id)
+  const [systemDocs, setSystemDocs] = useState<any[]>([])
 
   const fetchWatch = () => {
     if (!id) return
@@ -46,6 +50,23 @@ export default function WatchDetail() {
   }
 
   useEffect(() => { fetchWatch() }, [id])
+
+  // Also fetch SystemDocuments linked to this watch (uploaded via AddWatch global doc library)
+  useEffect(() => {
+    if (!id) return
+    api.get('/api/documents', { params: { watch_id: id } })
+      .then(res => setSystemDocs(res.data || []))
+      .catch(() => {})
+  }, [id])
+
+  // Currency conversion helper: amount in `currency` → ILS using live rates
+  const toILS = useCallback((amount: number | undefined | null, currency: string | undefined): number | null => {
+    if (!amount || amount <= 0 || !currency || currency === 'ILS') return amount ?? null
+    const ilsRate = rates?.['ILS'] ?? 3.73
+    const currRate = rates?.[currency]
+    if (!currRate) return null
+    return amount * (ilsRate / currRate)
+  }, [rates])
 
   const { getRootProps: getPhotoProps, getInputProps: getPhotoInput } = useDropzone({
     accept: { 'image/*': [] },
@@ -381,6 +402,95 @@ export default function WatchDetail() {
             )}
           </div>
 
+          {/* ─── Net Cost Breakdown ─── */}
+          {watch.purchase_price > 0 && (watch.tax_refund || (watch.import_tax ?? 0) > 0 || watch.purchase_price_ils) && (() => {
+            // Use stored historical rate for purchase; live rate for taxes (no historical stored for those)
+            const purchaseILS = watch.purchase_price_ils
+              ?? toILS(watch.purchase_price, watch.price_currency)
+            const refundILS = (watch.tax_refund && watch.tax_refund_amount)
+              ? toILS(watch.tax_refund_amount, watch.tax_refund_currency)
+              : null
+            const importILS = (watch.import_tax ?? 0) > 0
+              ? toILS(watch.import_tax!, watch.import_tax_currency)
+              : null
+            const netILS = purchaseILS != null
+              ? purchaseILS - (refundILS ?? 0) + (importILS ?? 0)
+              : null
+            const fmtILS = (n: number | null | undefined) =>
+              n != null ? `₪${Math.round(n).toLocaleString('he-IL')}` : '—'
+            return (
+              <div
+                className="rounded-xl p-5"
+                style={{ background: '#111827', border: '1px solid #1f2937' }}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <Calculator size={14} color="#9ca3af" />
+                  <h3 className="text-sm font-semibold text-gray-400">עלות בסיס נטו</h3>
+                </div>
+                <div className="space-y-2">
+                  {/* Purchase price */}
+                  <div className="flex items-center justify-between py-1 border-b border-gray-800">
+                    <span className="text-xs text-gray-500">מחיר קנייה</span>
+                    <div className="text-right">
+                      <span className="text-sm text-white">{fmtPrice(watch.purchase_price, watch.price_currency)}</span>
+                      {purchaseILS != null && (
+                        <span className="text-xs text-gray-500 mr-2">= {fmtILS(purchaseILS)}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Tax refund */}
+                  {watch.tax_refund && (watch.tax_refund_amount ?? 0) > 0 && (
+                    <div className="flex items-center justify-between py-1 border-b border-gray-800">
+                      <span className="text-xs text-gray-500">
+                        החזר מע"מ{watch.tax_refund_country ? ` (${watch.tax_refund_country})` : ''}
+                      </span>
+                      <div className="text-right">
+                        <span className="text-sm" style={{ color: '#10b981' }}>
+                          -{fmtPrice(watch.tax_refund_amount, watch.tax_refund_currency)}
+                        </span>
+                        {refundILS != null && (
+                          <span className="text-xs text-gray-500 mr-2">= -{fmtILS(refundILS)}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Import tax */}
+                  {(watch.import_tax ?? 0) > 0 && (
+                    <div className="flex items-center justify-between py-1 border-b border-gray-800">
+                      <span className="text-xs text-gray-500">מכס / מע"מ יבוא</span>
+                      <div className="text-right">
+                        <span className="text-sm" style={{ color: '#f87171' }}>
+                          +{fmtPrice(watch.import_tax, watch.import_tax_currency)}
+                        </span>
+                        {importILS != null && (
+                          <span className="text-xs text-gray-500 mr-2">= +{fmtILS(importILS)}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* NET total */}
+                  {netILS != null && (
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-xs font-semibold text-white">עלות נטו בשקלים</span>
+                      <span className="text-base font-bold" style={{ color: '#d4af37' }}>
+                        {fmtILS(netILS)}
+                      </span>
+                    </div>
+                  )}
+
+                  {(watch.tax_refund || (watch.import_tax ?? 0) > 0) && rates && (
+                    <p className="text-xs text-gray-600 mt-1">
+                      * מיסים/החזרים מומרים לפי שער עדכני; מחיר קנייה לפי שער ביום הרכישה
+                    </p>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Watch info */}
           <div
             className="rounded-xl p-5"
@@ -423,19 +533,26 @@ export default function WatchDetail() {
             </div>
           )}
 
-          {/* Documents */}
+          {/* Documents — shows both WatchDocuments (direct) + SystemDocuments (linked by watch_id) */}
           <div
             className="rounded-xl p-5"
             style={{ background: '#111827', border: '1px solid #1f2937' }}
           >
-            <h3 className="text-sm font-semibold text-gray-400 mb-3">מסמכים</h3>
-            {documents.length === 0 ? (
+            <h3 className="text-sm font-semibold text-gray-400 mb-3">
+              מסמכים {(documents.length + systemDocs.length) > 0 && (
+                <span className="mr-1 px-1.5 py-0.5 rounded-full text-xs" style={{ background: '#1f2937', color: '#6b7280' }}>
+                  {documents.length + systemDocs.length}
+                </span>
+              )}
+            </h3>
+            {documents.length === 0 && systemDocs.length === 0 ? (
               <p className="text-gray-600 text-sm mb-3">אין מסמכים</p>
             ) : (
               <div className="space-y-2 mb-3">
+                {/* WatchDocuments (uploaded via WatchDetail) */}
                 {documents.map(doc => (
                   <div
-                    key={doc.id}
+                    key={`wd-${doc.id}`}
                     className="flex items-center justify-between rounded-lg p-2"
                     style={{ background: '#1f2937' }}
                   >
@@ -446,20 +563,41 @@ export default function WatchDetail() {
                     <div className="flex gap-1.5 flex-shrink-0">
                       <a
                         href={`${import.meta.env.VITE_API_URL ?? ""}${doc.url}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="p-1 rounded"
-                        style={{ color: '#d4af37' }}
+                        target="_blank" rel="noreferrer"
+                        className="p-1 rounded" style={{ color: '#d4af37' }}
                       >
                         <Download size={14} />
                       </a>
-                      <button
-                        onClick={() => deleteDoc(doc.id)}
-                        className="p-1 rounded"
-                        style={{ color: '#ef4444' }}
-                      >
+                      <button onClick={() => deleteDoc(doc.id)} className="p-1 rounded" style={{ color: '#ef4444' }}>
                         <X size={14} />
                       </button>
+                    </div>
+                  </div>
+                ))}
+                {/* SystemDocuments (uploaded via AddWatch form or global docs) */}
+                {systemDocs.map(doc => (
+                  <div
+                    key={`sd-${doc.id}`}
+                    className="flex items-center justify-between rounded-lg p-2"
+                    style={{ background: '#1f2937' }}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText size={14} color="#d4af37" />
+                      <div className="min-w-0">
+                        <span className="text-xs text-gray-300 truncate block">{doc.original_name}</span>
+                        {doc.category_label && (
+                          <span className="text-xs" style={{ color: '#6b7280' }}>{doc.category_icon} {doc.category_label}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      <a
+                        href={`${import.meta.env.VITE_API_URL ?? ""}/api/documents/${doc.id}/download`}
+                        target="_blank" rel="noreferrer"
+                        className="p-1 rounded" style={{ color: '#d4af37' }}
+                      >
+                        <Download size={14} />
+                      </a>
                     </div>
                   </div>
                 ))}
