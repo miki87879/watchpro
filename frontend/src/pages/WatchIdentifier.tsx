@@ -277,6 +277,9 @@ export default function WatchIdentifier() {
   const [authOpen, setAuthOpen] = useState(false)
   const [notesOpen, setNotesOpen] = useState(false)
   const [dots, setDots] = useState('.')
+  // Auto-fetched watch image from Wikimedia Commons (fallback when no uploaded image)
+  const [commonsImage, setCommonsImage] = useState<string | null>(null)
+  const [commonsLoading, setCommonsLoading] = useState(false)
 
   // Animated dots: driven by context.loading
   useEffect(() => {
@@ -349,6 +352,25 @@ export default function WatchIdentifier() {
 
   // Use imagePreview from local state (new upload) or from context (previous search)
   const displayImage = imagePreview ?? ctxImagePreview
+
+  // When result appears and there's no uploaded image → fetch from Wikimedia Commons
+  useEffect(() => {
+    if (!result || displayImage) {
+      setCommonsImage(null)
+      setCommonsLoading(false)
+      return
+    }
+    setCommonsImage(null)
+    setCommonsLoading(true)
+    const apiBase = import.meta.env.VITE_API_URL ?? ''
+    fetch(
+      `${apiBase}/api/watch-id/watch-image?brand=${encodeURIComponent(result.brand)}&model=${encodeURIComponent(result.model)}&reference=${encodeURIComponent(result.reference)}`
+    )
+      .then(r => r.json())
+      .then(data => setCommonsImage(data.image_url ?? null))
+      .catch(() => setCommonsImage(null))
+      .finally(() => setCommonsLoading(false))
+  }, [result?.brand, result?.model, result?.reference, displayImage])
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -592,23 +614,42 @@ export default function WatchIdentifier() {
               </div>
             )}
 
-            {/* Watch image — full width above text when available */}
-            {(displayImage || result.reference_image_url) && (
-              <div className="mb-4 flex justify-center">
-                <img
-                  src={displayImage ?? result.reference_image_url!}
-                  alt={`${result.brand} ${result.model}`}
-                  className="rounded-xl object-contain"
-                  style={{
-                    maxHeight: 240,
-                    maxWidth: '100%',
-                    border: `1px solid ${BORDER}`,
-                    background: '#0d1117',
-                  }}
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                />
-              </div>
-            )}
+            {/* Watch image — uploaded photo takes priority, then Wikimedia Commons */}
+            {(() => {
+              const src = displayImage ?? commonsImage
+              if (!src && !commonsLoading) return null
+              return (
+                <div className="mb-5 flex justify-center">
+                  {commonsLoading && !src ? (
+                    <div
+                      className="rounded-xl flex items-center justify-center"
+                      style={{ width: 200, height: 150, background: '#0d1117', border: `1px solid ${BORDER}` }}
+                    >
+                      <div className="flex flex-col items-center gap-2">
+                        <div
+                          className="w-6 h-6 rounded-full animate-spin"
+                          style={{ border: `2px solid ${BORDER}`, borderTopColor: GOLD }}
+                        />
+                        <span className="text-xs" style={{ color: '#6b7280' }}>טוען תמונה...</span>
+                      </div>
+                    </div>
+                  ) : src ? (
+                    <img
+                      src={src}
+                      alt={`${result.brand} ${result.model}`}
+                      className="rounded-xl object-contain"
+                      style={{
+                        maxHeight: 260,
+                        maxWidth: '100%',
+                        border: `1px solid ${BORDER}`,
+                        background: '#0d1117',
+                      }}
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                    />
+                  ) : null}
+                </div>
+              )
+            })()}
 
             <div className="flex flex-wrap items-start justify-between gap-4">
               {/* Brand/model text */}

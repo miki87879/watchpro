@@ -417,6 +417,79 @@ async def identify_watch(body: IdentifyRequest):
     return result
 
 
+# ─── Watch image lookup via Wikimedia Commons ────────────────────────────────
+
+@router.get("/watch-id/watch-image")
+async def get_watch_image(brand: str, model: str, reference: str = ""):
+    """
+    Search Wikimedia Commons for a real watch image.
+    Returns { image_url: str | null }
+    Strategy:
+    1. Search Commons file namespace with brand+model+reference
+    2. Fallback: brand+model only
+    3. Return the first valid image URL
+    """
+    import httpx
+
+    async def _search_commons(query: str) -> Optional[str]:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            # Step 1: search the File namespace
+            search_r = await client.get(
+                "https://commons.wikimedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "list": "search",
+                    "srnamespace": "6",        # File namespace only
+                    "format": "json",
+                    "srsearch": query,
+                    "srlimit": "8",
+                    "srprop": "title",
+                },
+                headers={"User-Agent": "WatchProApp/1.0 (watch management app)"},
+            )
+            results = search_r.json().get("query", {}).get("search", [])
+            if not results:
+                return None
+
+            # Step 2: get actual image URL from first results
+            titles = "|".join(r["title"] for r in results[:5])
+            info_r = await client.get(
+                "https://commons.wikimedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "titles": titles,
+                    "prop": "imageinfo",
+                    "iiprop": "url|mime|size",
+                    "iiurlwidth": "500",   # request a 500px thumbnail
+                    "format": "json",
+                },
+                headers={"User-Agent": "WatchProApp/1.0 (watch management app)"},
+            )
+            pages = info_r.json().get("query", {}).get("pages", {})
+            for page in pages.values():
+                for info in page.get("imageinfo", []):
+                    mime = info.get("mime", "")
+                    if mime.startswith("image/") and "svg" not in mime:
+                        # Prefer thumbnail URL (resized), fall back to original
+                        url = info.get("thumburl") or info.get("url", "")
+                        if url:
+                            return url
+        return None
+
+    try:
+        # Try specific query first
+        specific = f"{brand} {model} {reference}".strip()
+        url = await _search_commons(specific)
+
+        # Fallback: brand + model without reference
+        if not url and reference:
+            url = await _search_commons(f"{brand} {model}")
+
+        return {"image_url": url}
+    except Exception:
+        return {"image_url": None}
+
+
 # ─── Quick-fill endpoint ─────────────────────────────────────────────────────
 QUICK_FILL_SYSTEM = """You are a luxury watch reference database. Given a reference number, return a compact JSON to pre-fill an inventory form. Accuracy is CRITICAL — never guess or hallucinate model names.
 
