@@ -250,7 +250,7 @@ export default function Dashboard() {
                 >
                   {watch.primary_photo ? (
                     <img
-                      src={`http://localhost:8000${watch.primary_photo}`}
+                      src={`${import.meta.env.VITE_API_URL ?? ""}${watch.primary_photo}`}
                       alt={`${watch.brand} ${watch.model}`}
                       className="w-full h-full object-cover"
                     />

@@ -135,7 +135,7 @@ export default function AdCreator() {
                         className="w-full flex items-center gap-3 px-4 py-3 text-right hover:bg-gray-700 transition-colors"
                       >
                         {w.primary_photo ? (
-                          <img src={`http://localhost:8000${w.primary_photo}`} alt="" className="w-10 h-10 object-cover rounded-lg flex-shrink-0" />
+                          <img src={`${import.meta.env.VITE_API_URL ?? ""}${w.primary_photo}`} alt="" className="w-10 h-10 object-cover rounded-lg flex-shrink-0" />
                         ) : (
                           <div className="w-10 h-10 rounded-lg flex-shrink-0 flex items-center justify-center" style={{ background: '#374151' }}>
                             <Watch size={16} color="#6b7280" />

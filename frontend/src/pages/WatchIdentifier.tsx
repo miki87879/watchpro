@@ -154,7 +154,8 @@ export default function WatchIdentifier() {
         image_base64: imageBase64,
       }
 
-      const res = await fetch('http://localhost:8000/api/watch-id/identify', {
+      const apiBase = import.meta.env.VITE_API_URL ?? ''
+      const res = await fetch(`${apiBase}/api/watch-id/identify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

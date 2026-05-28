@@ -211,7 +211,7 @@ function WatchCard({ watch, onClick }: { watch: WatchType; onClick: () => void }
   const imageUrl = watch.primary_photo
     ? watch.primary_photo.startsWith('http')
       ? watch.primary_photo
-      : `http://localhost:8000${watch.primary_photo}`
+      : `${import.meta.env.VITE_API_URL ?? ""}${watch.primary_photo}`
     : null
 
   return (

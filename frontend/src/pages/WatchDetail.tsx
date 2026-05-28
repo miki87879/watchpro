@@ -193,7 +193,7 @@ export default function WatchDetail() {
             {photos.length > 0 && currentPhoto ? (
               <>
                 <img
-                  src={`http://localhost:8000${currentPhoto.url}`}
+                  src={`${import.meta.env.VITE_API_URL ?? ""}${currentPhoto.url}`}
                   alt={`${watch.brand} ${watch.model}`}
                   className="w-full h-full object-contain"
                 />
@@ -233,7 +233,7 @@ export default function WatchDetail() {
               {photos.map((p, i) => (
                 <div key={p.id} className="relative flex-shrink-0 group">
                   <img
-                    src={`http://localhost:8000${p.url}`}
+                    src={`${import.meta.env.VITE_API_URL ?? ""}${p.url}`}
                     alt=""
                     onClick={() => setPhotoIdx(i)}
                     className="w-16 h-16 object-cover rounded-lg cursor-pointer"
@@ -385,7 +385,7 @@ export default function WatchDetail() {
                     </div>
                     <div className="flex gap-1.5 flex-shrink-0">
                       <a
-                        href={`http://localhost:8000${doc.url}`}
+                        href={`${import.meta.env.VITE_API_URL ?? ""}${doc.url}`}
                         target="_blank"
                         rel="noreferrer"
                         className="p-1 rounded"
