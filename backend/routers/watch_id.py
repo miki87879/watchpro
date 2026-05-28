@@ -490,6 +490,463 @@ async def get_watch_image(brand: str, model: str, reference: str = ""):
         return {"image_url": None}
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  LIVE MARKET PRICES  — GET /api/watch-id/market-prices
+# ══════════════════════════════════════════════════════════════════════════════
+import httpx as _httpx
+import time as _time
+from bs4 import BeautifulSoup as _BS
+import urllib.parse as _up
+
+# In-memory cache: key → {data, ts}
+_mkt_cache: dict = {}
+_MKT_TTL = 7200  # 2 hours
+
+# FX rates cache (1 {cur} → USD)
+_fx_rates: dict = {}
+_fx_ts: float = 0.0
+
+async def _refresh_fx():
+    global _fx_rates, _fx_ts
+    if _time.time() - _fx_ts < 3600:
+        return
+    try:
+        async with _httpx.AsyncClient(timeout=8.0) as c:
+            r = await c.get(
+                "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json"
+            )
+            if r.status_code == 200:
+                usd_map = r.json().get("usd", {})
+                # usd_map[cur] = units of that currency per 1 USD
+                # → 1 cur = 1/usd_map[cur] USD
+                _fx_rates = {
+                    k.upper(): (1.0 / v if v > 0 else None)
+                    for k, v in usd_map.items()
+                }
+                _fx_ts = _time.time()
+    except Exception:
+        pass
+
+_FX_FALLBACK = {
+    "EUR": 1.09, "GBP": 1.28, "CHF": 1.12, "ILS": 0.27,
+    "SEK": 0.095, "NOK": 0.094, "DKK": 0.145, "AED": 0.272,
+    "JPY": 0.0066, "AUD": 0.65, "CAD": 0.74, "HKD": 0.128,
+    "SGD": 0.74, "CNY": 0.138,
+}
+
+def _to_usd(amount: float, currency: str) -> float:
+    cur = currency.upper()
+    if cur == "USD":
+        return amount
+    rate = _fx_rates.get(cur) or _FX_FALLBACK.get(cur, 1.0)
+    return amount * rate
+
+def _parse_price_str(txt: str):
+    """Return (amount: float, currency: str) or (None, 'USD')."""
+    if not txt:
+        return None, "USD"
+    txt = txt.strip()
+    # Detect currency
+    cur = "USD"
+    for sym, c in [("€", "EUR"), ("£", "GBP"), ("CHF", "CHF"), ("¥", "JPY"),
+                   ("kr", "SEK"), ("₪", "ILS"), ("A$", "AUD"), ("C$", "CAD"),
+                   ("HK$", "HKD"), ("S$", "SGD")]:
+        if sym in txt:
+            cur = c
+            break
+    # Extract number
+    m = re.search(r"[\d]+(?:[.,]\d+)*", txt.replace(",", "").replace("'", ""))
+    if m:
+        try:
+            val = float(m.group().replace(",", ""))
+            if val >= 100:
+                return val, cur
+        except Exception:
+            pass
+    return None, cur
+
+_eBay_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+_eBay_H = {
+    "User-Agent": _eBay_UA,
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+
+async def _ebay_sold(client: "_httpx.AsyncClient", query: str) -> list:
+    """Scrape eBay *completed + sold* listings (actual transaction prices)."""
+    results = []
+    try:
+        url = (
+            "https://www.ebay.com/sch/i.html?"
+            + _up.urlencode({
+                "_nkw": query, "_sacat": "31387",
+                "LH_Complete": "1", "LH_Sold": "1",
+                "_sop": "15",   # newest first
+                "_ipg": "60",
+            })
+        )
+        r = await client.get(url, headers=_eBay_H, timeout=_httpx.Timeout(18.0))
+        if r.status_code != 200:
+            return results
+        soup = _BS(r.text, "lxml")
+        for item in soup.select(".s-item:not(.s-item--placeholder)")[:30]:
+            t_el = item.select_one(".s-item__title")
+            p_el = item.select_one(".s-item__price")
+            a_el = item.select_one("a.s-item__link")
+            date_el = item.select_one(".s-item__caption .POSITIVE, .s-item__endtime, .s-item__caption")
+
+            if not t_el or not p_el:
+                continue
+            title = t_el.get_text(strip=True)
+            if "Shop on eBay" in title or not title:
+                continue
+
+            price_txt = p_el.get_text(strip=True)
+            # Handle price ranges like "$8,000 to $9,000" — take lower bound
+            if " to " in price_txt:
+                price_txt = price_txt.split(" to ")[0]
+
+            amount, cur = _parse_price_str(price_txt)
+            if not amount or amount < 200:
+                continue
+
+            link = a_el.get("href", "") if a_el else ""
+            date = date_el.get_text(strip=True) if date_el else ""
+
+            results.append({
+                "title": title,
+                "price_usd": round(_to_usd(amount, cur), 0),
+                "price_local": amount,
+                "currency": cur,
+                "source": "eBay Sold",
+                "source_icon": "🛒",
+                "url": link,
+                "date": date,
+                "type": "sold",
+            })
+    except Exception as e:
+        print(f"[Market/eBay-sold] {e}")
+    return results
+
+
+async def _ebay_active_api(client: "_httpx.AsyncClient", query: str) -> list:
+    """eBay Browse API — active listings. Requires API key."""
+    from routers.price_scout import _get_ebay_token
+    results = []
+    try:
+        token = await _get_ebay_token()
+        if not token:
+            return results
+        r = await client.get(
+            "https://api.ebay.com/buy/browse/v1/item_summary/search",
+            params={
+                "q": query,
+                "category_ids": "31387",
+                "filter": "conditionIds:{3000|4000|5000}",
+                "sort": "price",
+                "limit": "30",
+            },
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+            },
+            timeout=_httpx.Timeout(15.0),
+        )
+        if r.status_code == 200:
+            for item in r.json().get("itemSummaries", []):
+                title = item.get("title", "").strip()
+                price_info = item.get("price", {})
+                try:
+                    amount = float(price_info.get("value", 0))
+                except Exception:
+                    continue
+                cur = price_info.get("currency", "USD")
+                url = item.get("itemWebUrl", "")
+                if amount < 200:
+                    continue
+                results.append({
+                    "title": title,
+                    "price_usd": round(_to_usd(amount, cur), 0),
+                    "price_local": amount,
+                    "currency": cur,
+                    "source": "eBay Active",
+                    "source_icon": "🛒",
+                    "url": url,
+                    "date": "",
+                    "type": "active",
+                })
+    except Exception as e:
+        print(f"[Market/eBay-API] {e}")
+    return results
+
+
+async def _chrono24_listings(client: "_httpx.AsyncClient", query: str) -> list:
+    """Chrono24 public search — try JSON output."""
+    results = []
+    try:
+        # Try their internal search API
+        r = await client.get(
+            "https://www.chrono24.com/search/index.htm",
+            params={
+                "dosearch": "dosearch",
+                "query": query,
+                "watchTypes": "2",
+                "resultview": "list",
+                "pageSize": "30",
+                "sortorder": "1",
+                "output": "json",
+            },
+            headers={
+                "User-Agent": _eBay_UA,
+                "Accept": "application/json, text/javascript, */*",
+                "Referer": "https://www.chrono24.com/",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            timeout=_httpx.Timeout(18.0),
+        )
+        if r.status_code == 200:
+            data = r.json()
+            for item in (data.get("listings") or data.get("articleItems") or [])[:20]:
+                title = item.get("title") or item.get("name") or ""
+                price_raw = (
+                    item.get("price") or item.get("priceFormatted") or
+                    item.get("displayPrice") or ""
+                )
+                if not title:
+                    continue
+                amount, cur = _parse_price_str(str(price_raw))
+                if not amount or amount < 200:
+                    continue
+                link = item.get("detailPageUrl") or item.get("url") or ""
+                if link and not link.startswith("http"):
+                    link = "https://www.chrono24.com" + link
+                results.append({
+                    "title": title,
+                    "price_usd": round(_to_usd(amount, cur), 0),
+                    "price_local": amount,
+                    "currency": cur,
+                    "source": "Chrono24",
+                    "source_icon": "🌐",
+                    "url": link,
+                    "date": "",
+                    "type": "active",
+                })
+    except Exception as e:
+        print(f"[Market/Chrono24] {e}")
+    return results
+
+
+async def _marktplaats_listings(client: "_httpx.AsyncClient", query: str) -> list:
+    """Marktplaats (NL) — European market prices."""
+    results = []
+    try:
+        r = await client.get(
+            "https://www.marktplaats.nl/lrp/api/search",
+            params={
+                "q": query,
+                "l1CategoryId": "385",
+                "l2CategoryId": "396",
+                "limit": "30",
+                "sortBy": "SORT_INDEX",
+                "sortOrder": "DECREASING",
+            },
+            headers={
+                "User-Agent": _eBay_UA,
+                "Accept": "application/json",
+                "Accept-Language": "nl-NL,nl;q=0.9",
+            },
+            timeout=_httpx.Timeout(15.0),
+        )
+        if r.status_code == 200:
+            for listing in r.json().get("listings", [])[:20]:
+                title = listing.get("title", "").strip()
+                if not title:
+                    continue
+                pc = listing.get("priceInfo", {}).get("priceCents", 0)
+                if not pc:
+                    continue
+                amount = pc / 100.0
+                if amount < 200:
+                    continue
+                vip = listing.get("vipUrl", "")
+                if vip and not vip.startswith("http"):
+                    vip = "https://www.marktplaats.nl" + vip
+                results.append({
+                    "title": title,
+                    "price_usd": round(_to_usd(amount, "EUR"), 0),
+                    "price_local": amount,
+                    "currency": "EUR",
+                    "source": "Marktplaats 🇳🇱",
+                    "source_icon": "🇳🇱",
+                    "url": vip,
+                    "date": "",
+                    "type": "active",
+                })
+    except Exception as e:
+        print(f"[Market/Marktplaats] {e}")
+    return results
+
+
+async def _reddit_prices(client: "_httpx.AsyncClient", query: str) -> list:
+    """Reddit WatchExchange — community seller prices."""
+    results = []
+    try:
+        r = await client.get(
+            f"https://www.reddit.com/r/Watchexchange/search.json"
+            f"?q={_up.quote(query)}&restrict_sr=1&sort=new&limit=25&t=year",
+            headers={
+                "User-Agent": "WatchProApp/2.0 (watch price research)",
+                "Accept": "application/json",
+            },
+            timeout=_httpx.Timeout(12.0),
+        )
+        if r.status_code == 200:
+            for post in r.json().get("data", {}).get("children", []):
+                p = post.get("data", {})
+                title = p.get("title", "").strip()
+                if not title:
+                    continue
+                # Only [WTS] posts have prices
+                if not any(m in title.upper() for m in ["[WTS]", "WTS ", "[FS]", "FOR SALE"]):
+                    continue
+                m = re.search(r"\$([\d,]+)", title)
+                if not m:
+                    continue
+                try:
+                    amount = float(m.group(1).replace(",", ""))
+                except Exception:
+                    continue
+                if amount < 200:
+                    continue
+                url = "https://reddit.com" + p.get("permalink", "")
+                results.append({
+                    "title": title,
+                    "price_usd": round(amount, 0),
+                    "price_local": amount,
+                    "currency": "USD",
+                    "source": "Reddit WatchExchange",
+                    "source_icon": "🔴",
+                    "url": url,
+                    "date": "",
+                    "type": "active",
+                })
+    except Exception as e:
+        print(f"[Market/Reddit] {e}")
+    return results
+
+
+def _compute_stats(prices_usd: list) -> dict:
+    if not prices_usd:
+        return {"count": 0, "min": None, "max": None, "median": None, "avg": None}
+    s = sorted(prices_usd)
+    n = len(s)
+    # Remove extreme outliers: keep within 4x of median
+    med_raw = s[n // 2]
+    s = [p for p in s if med_raw * 0.15 <= p <= med_raw * 5.0]
+    if not s:
+        s = sorted(prices_usd)
+    n = len(s)
+    return {
+        "count": n,
+        "min": int(s[0]),
+        "max": int(s[-1]),
+        "median": int(s[n // 2]),
+        "avg": int(sum(s) / n),
+        "p25": int(s[n // 4]),
+        "p75": int(s[(n * 3) // 4]),
+    }
+
+
+@router.get("/watch-id/market-prices")
+async def get_market_prices(brand: str, model: str, reference: str = ""):
+    """
+    Fetch live market prices from multiple sources.
+    Returns aggregated stats (min/max/median) and recent listings.
+    Results cached for 2 hours.
+    """
+    await _refresh_fx()
+
+    cache_key = f"{brand}|{model}|{reference}".lower().strip()
+    cached = _mkt_cache.get(cache_key)
+    if cached and _time.time() - cached["ts"] < _MKT_TTL:
+        return cached["data"]
+
+    # Build queries — most specific first
+    ref = reference.strip()
+    queries = []
+    if ref:
+        queries.append(ref)
+        queries.append(f"{brand} {ref}")
+    queries.append(f"{brand} {model}")
+    primary = queries[0]
+
+    limits = _httpx.Limits(max_keepalive_connections=10, max_connections=15)
+    async with _httpx.AsyncClient(
+        limits=limits,
+        follow_redirects=True,
+        timeout=_httpx.Timeout(18.0),
+    ) as client:
+        tasks = [
+            _ebay_sold(client, primary),
+            _ebay_active_api(client, primary),
+            _chrono24_listings(client, primary),
+            _marktplaats_listings(client, primary),
+            _reddit_prices(client, primary),
+        ]
+        raw = await asyncio.gather(*tasks, return_exceptions=True)
+
+    all_listings = []
+    sources_hit = []
+    for result in raw:
+        if isinstance(result, list) and result:
+            all_listings.extend(result)
+            src = result[0].get("source", "")
+            if src not in sources_hit:
+                sources_hit.append(src)
+
+    # If primary query returned nothing with just reference, try brand+model
+    if not all_listings and ref:
+        async with _httpx.AsyncClient(follow_redirects=True, timeout=_httpx.Timeout(18.0)) as client:
+            tasks2 = [
+                _ebay_sold(client, f"{brand} {model}"),
+                _chrono24_listings(client, f"{brand} {model}"),
+            ]
+            raw2 = await asyncio.gather(*tasks2, return_exceptions=True)
+            for result in raw2:
+                if isinstance(result, list):
+                    all_listings.extend(result)
+
+    # Sort: sold listings first (most credible), then by price
+    sold_listings = [l for l in all_listings if l.get("type") == "sold"]
+    active_listings = [l for l in all_listings if l.get("type") == "active"]
+    sold_listings.sort(key=lambda x: x["price_usd"])
+    active_listings.sort(key=lambda x: x["price_usd"])
+
+    combined = sold_listings + active_listings
+
+    # Compute stats (prefer sold prices for accuracy)
+    sold_prices = [l["price_usd"] for l in sold_listings if l["price_usd"]]
+    all_prices  = [l["price_usd"] for l in combined if l["price_usd"]]
+
+    stats = _compute_stats(sold_prices if len(sold_prices) >= 3 else all_prices)
+
+    result_data = {
+        "query": primary,
+        "stats": stats,
+        "listings": combined[:20],       # cap at 20 for the UI
+        "sold_count": len(sold_listings),
+        "sources_hit": sources_hit,
+        "fetched_at": _time.strftime("%d/%m/%Y %H:%M", _time.gmtime()),
+        "from_cache": False,
+    }
+
+    _mkt_cache[cache_key] = {"data": result_data, "ts": _time.time()}
+    return result_data
+
+
 # ─── Quick-fill endpoint ─────────────────────────────────────────────────────
 QUICK_FILL_SYSTEM = """You are a luxury watch reference database. Given a reference number, return a compact JSON to pre-fill an inventory form. Accuracy is CRITICAL — never guess or hallucinate model names.
 

@@ -4,9 +4,64 @@ import {
   Scan, Upload, X, ChevronDown, ChevronUp,
   TrendingUp, TrendingDown, Minus, ShieldCheck,
   AlertTriangle, Star, DollarSign, Info,
+  ExternalLink, RefreshCw, Activity,
 } from 'lucide-react'
 import { useWatchSearch, clearWatchCache } from '../context/WatchSearchContext'
 import type { WatchResult } from '../context/WatchSearchContext'
+
+// ─── Live Market Types ────────────────────────────────────────────────────────
+interface MarketListing {
+  title: string
+  price_usd: number
+  price_local: number
+  currency: string
+  source: string
+  source_icon: string
+  url: string
+  date: string
+  type: 'sold' | 'active'
+}
+interface MarketStats {
+  count: number
+  min: number | null
+  max: number | null
+  median: number | null
+  avg: number | null
+  p25: number | null
+  p75: number | null
+}
+interface MarketData {
+  query: string
+  stats: MarketStats
+  listings: MarketListing[]
+  sold_count: number
+  sources_hit: string[]
+  fetched_at: string
+  from_cache: boolean
+}
+interface LiveMarketState {
+  loading: boolean
+  data: MarketData | null
+  error: string | null
+}
+
+// ─── Market price cache (localStorage, 2h TTL) ────────────────────────────────
+const MKT_CACHE_TTL = 2 * 60 * 60 * 1000
+function mktCacheKey(brand: string, model: string, ref: string) {
+  return `mkt_${brand}_${model}_${ref}`.toLowerCase().replace(/\s+/g, '_')
+}
+function readMktCache(key: string): MarketData | null {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return null
+    const { ts, data } = JSON.parse(raw)
+    if (Date.now() - ts > MKT_CACHE_TTL) { localStorage.removeItem(key); return null }
+    return data
+  } catch { return null }
+}
+function writeMktCache(key: string, data: MarketData) {
+  try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })) } catch {}
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const GOLD = '#d4af37'
@@ -280,6 +335,8 @@ export default function WatchIdentifier() {
   // Auto-fetched watch image from Wikimedia Commons (fallback when no uploaded image)
   const [commonsImage, setCommonsImage] = useState<string | null>(null)
   const [commonsLoading, setCommonsLoading] = useState(false)
+  // Live market prices
+  const [liveMarket, setLiveMarket] = useState<LiveMarketState>({ loading: false, data: null, error: null })
 
   // Animated dots: driven by context.loading
   useEffect(() => {
@@ -371,6 +428,39 @@ export default function WatchIdentifier() {
       .catch(() => setCommonsImage(null))
       .finally(() => setCommonsLoading(false))
   }, [result?.brand, result?.model, result?.reference, displayImage])
+
+  // Live market prices: auto-fetch when result appears
+  const fetchLiveMarket = async (brand: string, model: string, reference: string, force = false) => {
+    const key = mktCacheKey(brand, model, reference)
+    if (!force) {
+      const cached = readMktCache(key)
+      if (cached) {
+        setLiveMarket({ loading: false, data: { ...cached, from_cache: true }, error: null })
+        return
+      }
+    }
+    setLiveMarket({ loading: true, data: null, error: null })
+    const apiBase = import.meta.env.VITE_API_URL ?? ''
+    try {
+      const res = await fetch(
+        `${apiBase}/api/watch-id/market-prices?brand=${encodeURIComponent(brand)}&model=${encodeURIComponent(model)}&reference=${encodeURIComponent(reference)}`
+      )
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data: MarketData = await res.json()
+      writeMktCache(key, data)
+      setLiveMarket({ loading: false, data, error: null })
+    } catch (e) {
+      setLiveMarket({ loading: false, data: null, error: 'לא ניתן לשלוף מחירים חיים כרגע' })
+    }
+  }
+
+  useEffect(() => {
+    if (!result) {
+      setLiveMarket({ loading: false, data: null, error: null })
+      return
+    }
+    fetchLiveMarket(result.brand, result.model, result.reference)
+  }, [result?.brand, result?.model, result?.reference])
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -733,12 +823,179 @@ export default function WatchIdentifier() {
             </div>
           </div>
 
-          {/* 3b. Market Value Grid */}
-          <div>
-            <h3 className="text-sm font-semibold mb-3" style={{ color: '#9ca3af' }}>
-              שווי שוק (USD)
-            </h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          {/* 3b. LIVE Market Prices Panel */}
+          <div
+            className="rounded-2xl overflow-hidden"
+            style={{ border: `1px solid rgba(34,197,94,0.35)`, background: 'linear-gradient(135deg,#061a0e,#0d1b14)' }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid rgba(34,197,94,0.15)' }}>
+              <div className="flex items-center gap-2">
+                <Activity size={16} color="#22c55e" />
+                <span className="font-bold text-sm" style={{ color: '#22c55e' }}>מחירי שוק חיים</span>
+                {liveMarket.data?.from_cache && (
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.12)', color: '#86efac' }}>
+                    📦 שמור
+                  </span>
+                )}
+                {!liveMarket.loading && liveMarket.data && (
+                  <span className="text-xs" style={{ color: '#4b7a5e' }}>
+                    עודכן {liveMarket.data.fetched_at}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => result && fetchLiveMarket(result.brand, result.model, result.reference, true)}
+                disabled={liveMarket.loading}
+                className="p-1.5 rounded-lg transition-all hover:bg-green-900/30"
+                title="רענן מחירים"
+              >
+                <RefreshCw size={14} color="#4b7a5e" className={liveMarket.loading ? 'animate-spin' : ''} />
+              </button>
+            </div>
+
+            <div className="px-5 py-4 space-y-4">
+              {/* Loading */}
+              {liveMarket.loading && (
+                <div className="flex items-center gap-3 py-2">
+                  <RefreshCw size={16} color="#22c55e" className="animate-spin flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium" style={{ color: '#86efac' }}>שולף מחירים חיים מהשוק...</p>
+                    <p className="text-xs" style={{ color: '#4b7a5e' }}>eBay Sold · Chrono24 · Marktplaats · Reddit</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Error */}
+              {liveMarket.error && !liveMarket.loading && (
+                <p className="text-xs" style={{ color: '#6b7280' }}>{liveMarket.error}</p>
+              )}
+
+              {/* Stats */}
+              {liveMarket.data && !liveMarket.loading && (() => {
+                const { stats, listings, sold_count, sources_hit } = liveMarket.data
+                const hasPrices = stats.count > 0 && stats.min != null && stats.max != null && stats.median != null
+
+                return (
+                  <>
+                    {/* Source badges */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {sources_hit.map(s => (
+                        <span key={s} className="text-xs px-2 py-0.5 rounded-full"
+                          style={{ background: 'rgba(34,197,94,0.1)', color: '#86efac', border: '1px solid rgba(34,197,94,0.2)' }}>
+                          {s}
+                        </span>
+                      ))}
+                      {sold_count > 0 && (
+                        <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                          style={{ background: 'rgba(34,197,94,0.2)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.4)' }}>
+                          ✓ {sold_count} מכירות שהושלמו
+                        </span>
+                      )}
+                    </div>
+
+                    {hasPrices ? (
+                      <>
+                        {/* Stats grid */}
+                        <div className="grid grid-cols-3 gap-3">
+                          {[
+                            { label: 'מינימום', value: stats.min!, color: '#f59e0b' },
+                            { label: 'חציון (מדויק)', value: stats.median!, color: '#22c55e' },
+                            { label: 'מקסימום', value: stats.max!, color: '#60a5fa' },
+                          ].map(({ label, value, color }) => (
+                            <div key={label} className="rounded-xl p-3 text-center"
+                              style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                              <p className="text-xs mb-1" style={{ color: '#6b7280' }}>{label}</p>
+                              <p className="text-lg font-bold" style={{ color }}>${value.toLocaleString()}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Visual range bar */}
+                        {stats.min != null && stats.max != null && stats.median != null && stats.min !== stats.max && (
+                          <div>
+                            <div className="relative h-3 rounded-full overflow-hidden" style={{ background: '#1a2e1a' }}>
+                              {/* Full range */}
+                              <div className="absolute inset-y-0 rounded-full" style={{ background: 'rgba(34,197,94,0.2)', left: '0%', right: '0%' }} />
+                              {/* IQR band */}
+                              {stats.p25 != null && stats.p75 != null && (() => {
+                                const range = stats.max! - stats.min!
+                                const left = ((stats.p25! - stats.min!) / range) * 100
+                                const width = ((stats.p75! - stats.p25!) / range) * 100
+                                return (
+                                  <div className="absolute inset-y-0 rounded-full"
+                                    style={{ background: 'rgba(34,197,94,0.5)', left: `${left}%`, width: `${width}%` }} />
+                                )
+                              })()}
+                              {/* Median marker */}
+                              {(() => {
+                                const pct = ((stats.median! - stats.min!) / (stats.max! - stats.min!)) * 100
+                                return (
+                                  <div className="absolute inset-y-0 w-1 rounded-full"
+                                    style={{ background: '#22c55e', left: `${pct}%`, transform: 'translateX(-50%)' }} />
+                                )
+                              })()}
+                            </div>
+                            <div className="flex justify-between text-xs mt-0.5" style={{ color: '#4b7a5e' }}>
+                              <span>${stats.min!.toLocaleString()}</span>
+                              <span style={{ color: '#22c55e' }}>⬆ חציון ${stats.median!.toLocaleString()}</span>
+                              <span>${stats.max!.toLocaleString()}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        <p className="text-xs" style={{ color: '#4b7a5e' }}>
+                          {stats.count} תוצאות · ממוצע: ${stats.avg?.toLocaleString()} · כל המחירים ב-USD
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-sm" style={{ color: '#4b7a5e' }}>
+                        לא נמצאו מחירים מספיקים לחישוב סטטיסטיקה לשאילתה זו
+                      </p>
+                    )}
+
+                    {/* Recent listings */}
+                    {listings.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold" style={{ color: '#4b7a5e' }}>עסקאות אחרונות</p>
+                        {listings.slice(0, 8).map((l, i) => (
+                          <a
+                            key={i}
+                            href={l.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 rounded-lg px-3 py-2 transition-all hover:bg-green-900/20 group"
+                            style={{ background: 'rgba(0,0,0,0.2)' }}
+                          >
+                            <span className="text-xs flex-shrink-0">{l.source_icon}</span>
+                            <span className="text-xs flex-1 truncate" style={{ color: '#9ca3af' }}>{l.title}</span>
+                            <span className="text-xs font-bold flex-shrink-0"
+                              style={{ color: l.type === 'sold' ? '#22c55e' : '#60a5fa' }}>
+                              ${l.price_usd.toLocaleString()}
+                              {l.type === 'sold' && <span style={{ color: '#4b7a5e', fontWeight: 400 }}> ✓</span>}
+                            </span>
+                            <ExternalLink size={11} color="#374151" className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+            </div>
+          </div>
+
+          {/* 3b-2. AI Estimate (Claude) — secondary reference */}
+          <details className="group">
+            <summary
+              className="flex items-center gap-2 cursor-pointer select-none rounded-xl px-4 py-3 transition-all hover:opacity-80"
+              style={{ background: CARD_BG, border: `1px solid ${BORDER}`, color: '#6b7280', fontSize: 13 }}
+            >
+              <span>🤖</span>
+              <span>הערכת AI (Claude) — לפי נתוני אימון</span>
+              <ChevronDown size={14} className="mr-auto group-open:rotate-180 transition-transform" />
+            </summary>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mt-2">
               {[
                 { label: 'Full Set מושלם', key: 'mint_full_set', color: '#22c55e' },
                 { label: 'מצוין + תעודות', key: 'excellent_with_papers', color: '#84cc16' },
@@ -758,7 +1015,7 @@ export default function WatchIdentifier() {
                 </div>
               ))}
             </div>
-          </div>
+          </details>
 
           {/* Investment grade */}
           <div
