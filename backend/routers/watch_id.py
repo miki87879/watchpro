@@ -357,6 +357,12 @@ async def identify_watch(body: IdentifyRequest):
     if serial_year and not result.get("serial_year"):
         result["serial_year"] = serial_year
 
+    # Enforce confidence floor when user explicitly provided a valid reference number.
+    # Claude systematically hedges when an image is also present — we correct that here.
+    if body.query_type == "reference" and body.query and detect_reference(body.query.strip()):
+        if result.get("confidence", 0) < 0.97:
+            result["confidence"] = 0.97
+
     _log("WATCH_IDENTIFY", body.query or body.serial or "image", {"brand": result.get("brand"), "model": result.get("model")})
     return result
 
