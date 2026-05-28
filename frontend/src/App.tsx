@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { ReactNode } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { CurrencyProvider } from './context/CurrencyContext'
+import { WatchSearchProvider } from './context/WatchSearchContext'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -85,7 +86,9 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <CurrencyProvider>
-          <AppRoutes />
+          <WatchSearchProvider>
+            <AppRoutes />
+          </WatchSearchProvider>
         </CurrencyProvider>
       </AuthProvider>
     </BrowserRouter>

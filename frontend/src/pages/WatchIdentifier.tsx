@@ -1,61 +1,12 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Scan, Upload, X, ChevronDown, ChevronUp,
   TrendingUp, TrendingDown, Minus, ShieldCheck,
   AlertTriangle, Star, DollarSign, Info,
 } from 'lucide-react'
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface SimilarModel {
-  reference: string
-  nickname: string | null
-  note: string
-}
-
-interface WatchResult {
-  brand: string
-  model: string
-  reference: string
-  nickname: string | null
-  confidence: number
-  year_introduced: number | null
-  still_in_production: boolean | null
-  serial_year: number | null
-  case_material: string | null
-  case_size_mm: number | null
-  case_thickness_mm: number | null
-  lug_width_mm: number | null
-  movement: string | null
-  power_reserve_hours: number | null
-  water_resistance_m: number | null
-  crystal: string | null
-  bracelet: string | null
-  clasp: string | null
-  dial_color: string | null
-  dial_description: string | null
-  bezel: string | null
-  retail_price_usd: number | null
-  market_values: {
-    mint_full_set: number | null
-    excellent_with_papers: number | null
-    excellent_no_papers: number | null
-    good: number | null
-    fair: number | null
-  }
-  investment_grade: 'A+' | 'A' | 'B' | 'C' | 'D'
-  investment_reasoning: string
-  price_trend: 'rising' | 'stable' | 'falling'
-  price_trend_note: string
-  best_time_to_buy: string
-  authentication_tips: string[]
-  red_flags: string[]
-  similar_models: SimilarModel[]
-  collector_notes: string
-  availability: string
-  historical_significance: string
-  box_papers_premium: string
-}
+import { useWatchSearch, clearWatchCache } from '../context/WatchSearchContext'
+import type { WatchResult } from '../context/WatchSearchContext'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const GOLD = '#d4af37'
@@ -82,22 +33,233 @@ const QUICK = [
   'Omega Speedmaster 311.30.42.30.01.005',
 ]
 
+// ─── Report generation ────────────────────────────────────────────────────────
+function generateReport(result: WatchResult, imagePreview: string | null): void {
+  const fmtVal = (n: number | null | undefined) =>
+    n != null ? `$${n.toLocaleString('en-US')}` : '—'
+
+  const specsRows = [
+    ['קוטר קייס', result.case_size_mm ? `${result.case_size_mm} מ"מ` : null],
+    ['עובי קייס', result.case_thickness_mm ? `${result.case_thickness_mm} מ"מ` : null],
+    ['רוחב אוזניות', result.lug_width_mm ? `${result.lug_width_mm} מ"מ` : null],
+    ['חומר קייס', result.case_material],
+    ['תנועה', result.movement],
+    ['עתודת כוח', result.power_reserve_hours ? `${result.power_reserve_hours} שעות` : null],
+    ['עמידות למים', result.water_resistance_m ? `${result.water_resistance_m} מ\'` : null],
+    ['קריסטל', result.crystal],
+    ['צמיד', result.bracelet],
+    ['אבזם', result.clasp],
+    ['צבע ציפוי', result.dial_color],
+    ['לוח', result.dial_description],
+    ['לוח הרים', result.bezel],
+    ['מחיר קמעונאי', result.retail_price_usd ? fmtVal(result.retail_price_usd) : null],
+  ].filter(([, v]) => v != null)
+
+  const trendLabel =
+    result.price_trend === 'rising' ? '↑ עולה' :
+    result.price_trend === 'falling' ? '↓ יורד' : '— יציב'
+
+  const html = `<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${result.brand} ${result.model} Ref. ${result.reference} - Watch Pro Report</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #111827;
+      color: #d1d5db;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      direction: rtl;
+      padding: 40px 24px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    h1 { color: #d4af37; font-size: 1.8rem; margin-bottom: 6px; }
+    h2 { color: #d4af37; font-size: 1.1rem; margin: 32px 0 12px; border-bottom: 1px solid #374151; padding-bottom: 6px; }
+    .subtitle { color: #9ca3af; font-size: 0.95rem; margin-bottom: 32px; }
+    .hero { display: flex; gap: 28px; align-items: flex-start; margin-bottom: 32px; }
+    .hero img { width: 200px; height: 200px; object-fit: cover; border-radius: 12px; border: 1px solid #374151; flex-shrink: 0; }
+    .hero-info { flex: 1; }
+    .hero-info h1 { font-size: 2rem; }
+    .ref { font-size: 1.2rem; color: #9ca3af; font-family: monospace; margin: 4px 0 16px; }
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      background: rgba(212,175,55,0.15);
+      color: #d4af37;
+      margin-left: 8px;
+    }
+    .confidence {
+      font-size: 0.9rem;
+      color: #9ca3af;
+      margin-top: 12px;
+    }
+    .market-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 8px; }
+    .market-cell { background: #0d1117; border: 1px solid #1f2937; border-radius: 10px; padding: 14px; text-align: center; }
+    .market-cell .label { font-size: 0.72rem; color: #6b7280; margin-bottom: 6px; }
+    .market-cell .value { font-size: 1.1rem; font-weight: bold; }
+    .specs-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .spec-cell { background: #0d1117; border: 1px solid #1f2937; border-radius: 8px; padding: 10px 14px; }
+    .spec-cell .label { font-size: 0.72rem; color: #6b7280; margin-bottom: 2px; }
+    .spec-cell .value { font-size: 0.9rem; color: #d1d5db; }
+    .invest-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
+    .invest-cell { background: #0d1117; border-radius: 8px; padding: 12px 14px; }
+    .invest-cell .label { font-size: 0.72rem; color: #6b7280; margin-bottom: 4px; }
+    .invest-cell .value { font-size: 0.9rem; color: #d1d5db; }
+    .grade-box {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 56px; height: 56px;
+      border-radius: 10px;
+      font-size: 1.4rem;
+      font-weight: bold;
+      float: right;
+      margin-left: 16px;
+    }
+    .reasoning { font-size: 0.9rem; line-height: 1.6; color: #9ca3af; }
+    .list-items { list-style: none; padding: 0; }
+    .list-items li { padding: 6px 0; font-size: 0.9rem; border-bottom: 1px solid #1f2937; }
+    .list-items li:last-child { border-bottom: none; }
+    .notes-box { background: #0d1117; border-radius: 8px; padding: 14px; font-size: 0.9rem; line-height: 1.7; color: #9ca3af; }
+    .footer { margin-top: 40px; text-align: center; font-size: 0.75rem; color: #4b5563; }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    ${imagePreview ? `<img src="${imagePreview}" alt="${result.brand} ${result.model}" />` : ''}
+    <div class="hero-info">
+      <h1>${result.brand} ${result.model}${result.nickname ? `<span class="badge">"${result.nickname}"</span>` : ''}</h1>
+      <p class="ref">Ref. ${result.reference}</p>
+      ${result.year_introduced ? `<span style="background:#1f2937;color:#9ca3af;padding:3px 10px;border-radius:6px;font-size:0.8rem;margin-left:6px;">הוצג: ${result.year_introduced}</span>` : ''}
+      ${result.serial_year ? `<span style="background:#1f2937;color:#9ca3af;padding:3px 10px;border-radius:6px;font-size:0.8rem;margin-left:6px;">שנת ייצור: ${result.serial_year}</span>` : ''}
+      ${result.still_in_production != null ? `<span style="background:${result.still_in_production ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)'};color:${result.still_in_production ? '#22c55e' : '#ef4444'};padding:3px 10px;border-radius:6px;font-size:0.8rem;">${result.still_in_production ? 'בייצור' : 'הופסק'}</span>` : ''}
+      <p class="confidence">רמת ביטחון: <strong style="color:#d4af37;">${Math.round(result.confidence * 100)}%</strong></p>
+    </div>
+  </div>
+
+  <h2>שווי שוק (USD)</h2>
+  <div class="market-grid">
+    <div class="market-cell">
+      <div class="label">Full Set מושלם</div>
+      <div class="value" style="color:#22c55e;">${fmtVal(result.market_values.mint_full_set)}</div>
+    </div>
+    <div class="market-cell">
+      <div class="label">מצוין + תעודות</div>
+      <div class="value" style="color:#84cc16;">${fmtVal(result.market_values.excellent_with_papers)}</div>
+    </div>
+    <div class="market-cell">
+      <div class="label">מצוין</div>
+      <div class="value" style="color:#d4af37;">${fmtVal(result.market_values.excellent_no_papers)}</div>
+    </div>
+    <div class="market-cell">
+      <div class="label">טוב</div>
+      <div class="value" style="color:#f59e0b;">${fmtVal(result.market_values.good)}</div>
+    </div>
+    <div class="market-cell">
+      <div class="label">סביר</div>
+      <div class="value" style="color:#f97316;">${fmtVal(result.market_values.fair)}</div>
+    </div>
+  </div>
+
+  <h2>מפרט טכני</h2>
+  <div class="specs-grid">
+    ${specsRows.map(([label, value]) => `
+    <div class="spec-cell">
+      <div class="label">${label}</div>
+      <div class="value">${value}</div>
+    </div>`).join('')}
+  </div>
+
+  <h2>ניתוח השקעה</h2>
+  <div style="overflow:hidden;margin-bottom:12px;">
+    <div class="grade-box" style="border:2px solid ${gradeColor(result.investment_grade)};background:${gradeColor(result.investment_grade)}22;color:${gradeColor(result.investment_grade)};">
+      ${result.investment_grade}
+    </div>
+    <p class="reasoning">${result.investment_reasoning}</p>
+  </div>
+  <div class="invest-grid">
+    <div class="invest-cell">
+      <div class="label">מגמת מחיר</div>
+      <div class="value">${trendLabel} — ${result.price_trend_note}</div>
+    </div>
+    <div class="invest-cell">
+      <div class="label">עיתוי לרכישה</div>
+      <div class="value">${result.best_time_to_buy}</div>
+    </div>
+    <div class="invest-cell">
+      <div class="label">פרמיית קופסה + תעודות</div>
+      <div class="value" style="color:#d4af37;">${result.box_papers_premium}</div>
+    </div>
+  </div>
+  ${result.availability ? `<div class="notes-box" style="margin-top:8px;">${result.availability}</div>` : ''}
+
+  ${result.authentication_tips.length > 0 ? `
+  <h2>נקודות בדיקה (אימות)</h2>
+  <ul class="list-items">
+    ${result.authentication_tips.map(t => `<li style="color:#22c55e;">✓ ${t}</li>`).join('')}
+  </ul>` : ''}
+
+  ${result.red_flags.length > 0 ? `
+  <h2>דגלים אדומים</h2>
+  <ul class="list-items">
+    ${result.red_flags.map(f => `<li style="color:#ef4444;">⚠ ${f}</li>`).join('')}
+  </ul>` : ''}
+
+  ${result.collector_notes || result.historical_significance ? `
+  <h2>הערות קולקטורים</h2>
+  ${result.collector_notes ? `<div class="notes-box">${result.collector_notes}</div>` : ''}
+  ${result.historical_significance ? `
+  <div class="notes-box" style="margin-top:10px;">
+    <div style="font-size:0.72rem;color:#6b7280;margin-bottom:4px;">משמעות היסטורית</div>
+    ${result.historical_significance}
+  </div>` : ''}` : ''}
+
+  <div class="footer">
+    נוצר על-ידי Watch Pro · ${new Date().toLocaleDateString('he-IL')}
+  </div>
+</body>
+</html>`
+
+  const blob = new Blob([html], { type: 'text/html' })
+  window.open(URL.createObjectURL(blob), '_blank')
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function WatchIdentifier() {
   const navigate = useNavigate()
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Context (loading, result, error, imagePreview, fromCache)
+  const { loading, result, error, imagePreview: ctxImagePreview, fromCache, startSearch } = useWatchSearch()
+
+  // Local state
   const [query, setQuery] = useState('')
   const [queryType, setQueryType] = useState<'reference' | 'serial' | 'name'>('reference')
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<WatchResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
   const [notesOpen, setNotesOpen] = useState(false)
   const [dots, setDots] = useState('.')
+
+  // Animated dots: driven by context.loading
+  useEffect(() => {
+    if (!loading) {
+      setDots('.')
+      return
+    }
+    let count = 1
+    const interval = setInterval(() => {
+      count = (count % 3) + 1
+      setDots('.'.repeat(count))
+    }, 500)
+    return () => clearInterval(interval)
+  }, [loading])
 
   const INPUT_MODES = [
     { key: 'reference' as const, label: '# רפרנס', placeholder: 'לדוגמה: 126610LN / 5711/1A / 15500ST / 126235' },
@@ -106,33 +268,18 @@ export default function WatchIdentifier() {
   ]
   const currentMode = INPUT_MODES.find(m => m.key === queryType)!
 
-  // Detect if input looks like a reference number even when serial tab is selected
   const looksLikeReference = queryType === 'serial' && query.trim().length >= 5 && (
-    /^\d{5,6}[A-Z]{0,4}$/i.test(query.trim()) ||   // Rolex: 126610LN, 126235, 127235
-    /^\d{4}\/\d{1,2}[A-Z]?$/i.test(query.trim()) || // Patek: 5711/1A
-    /^\d{5}[A-Z]{2}/i.test(query.trim())             // AP: 15500ST
+    /^\d{5,6}[A-Z]{0,4}$/i.test(query.trim()) ||
+    /^\d{4}\/\d{1,2}[A-Z]?$/i.test(query.trim()) ||
+    /^\d{5}[A-Z]{2}/i.test(query.trim())
   )
 
-  // Animated dots for loading
-  const startDots = () => {
-    let count = 1
-    const interval = setInterval(() => {
-      count = (count % 3) + 1
-      setDots('.'.repeat(count))
-    }, 500)
-    return interval
-  }
-
   const handleFile = (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setError('יש להעלות קובץ תמונה בלבד (JPEG, PNG, WebP)')
-      return
-    }
+    if (!file.type.startsWith('image/')) return
     setImageFile(file)
     const reader = new FileReader()
     reader.onload = (e) => setImagePreview(e.target?.result as string)
     reader.readAsDataURL(file)
-    setError(null)
   }
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -143,58 +290,24 @@ export default function WatchIdentifier() {
   }, [])
 
   const identify = async () => {
-    if (!query.trim() && !imageFile) {
-      setError('יש להזין שם שעון או להעלות תמונה')
-      return
-    }
-    setError(null)
-    setResult(null)
-    setLoading(true)
-    const interval = startDots()
+    if (!query.trim() && !imageFile) return
 
-    try {
-      let imageBase64: string | null = null
-      if (imageFile) {
-        imageBase64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(reader.result as string)
-          reader.onerror = reject
-          reader.readAsDataURL(imageFile)
-        })
-      }
-
-      const payload = {
-        query: queryType !== 'serial' ? query.trim() || null : null,
-        serial: queryType === 'serial' ? query.trim() || null : null,
-        image_base64: imageBase64,
-        query_type: query.trim() ? queryType : null,
-      }
-
-      const apiBase = import.meta.env.VITE_API_URL ?? ''
-      const res = await fetch(`${apiBase}/api/watch-id/identify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+    let imageBase64: string | null = null
+    if (imageFile) {
+      imageBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(imageFile)
       })
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }))
-        throw new Error(err.detail || `שגיאת שרת ${res.status}`)
-      }
-
-      const data: WatchResult = await res.json()
-      setResult(data)
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      if (msg.includes('422') || msg.includes('non-JSON')) {
-        setError('לא ניתן לזהות את השעון. נסה לספק פרטים מדויקים יותר.')
-      } else {
-        setError(msg)
-      }
-    } finally {
-      clearInterval(interval)
-      setLoading(false)
     }
+
+    startSearch({
+      query,
+      queryType,
+      imageBase64,
+      imagePreview: imagePreview,
+    })
   }
 
   const clearImage = () => {
@@ -202,6 +315,9 @@ export default function WatchIdentifier() {
     setImagePreview(null)
     if (fileRef.current) fileRef.current.value = ''
   }
+
+  // Use imagePreview from local state (new upload) or from context (previous search)
+  const displayImage = imagePreview ?? ctxImagePreview
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -268,7 +384,6 @@ export default function WatchIdentifier() {
             onBlur={(e) => (e.target.style.borderColor = looksLikeReference ? '#f59e0b' : BORDER)}
           />
 
-          {/* Auto-detect: warn if input looks like a reference number while in serial mode */}
           {looksLikeReference && (
             <div
               className="mt-2 rounded-xl px-4 py-3 flex items-center justify-between gap-3"
@@ -434,48 +549,71 @@ export default function WatchIdentifier() {
               border: `1px solid ${GOLD}`,
             }}
           >
+            {/* Cache badge */}
+            {fromCache && (
+              <div className="flex justify-end mb-3">
+                <span
+                  className="text-xs px-3 py-1 rounded-full font-medium"
+                  style={{ background: 'rgba(212,175,55,0.15)', color: GOLD, border: `1px solid rgba(212,175,55,0.3)` }}
+                >
+                  📦 תוצאה שמורה
+                </span>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="space-y-1 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-2xl font-bold" style={{ color: GOLD }}>
-                    {result.brand} {result.model}
-                  </h2>
-                  {result.nickname && (
-                    <span
-                      className="px-2 py-0.5 rounded-full text-xs font-medium"
-                      style={{ background: 'rgba(212,175,55,0.15)', color: GOLD }}
-                    >
-                      "{result.nickname}"
-                    </span>
-                  )}
-                </div>
-                <p className="text-lg font-mono" style={{ color: '#d1d5db' }}>
-                  Ref. {result.reference}
-                </p>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {result.year_introduced && (
-                    <span className="text-xs px-2 py-1 rounded-lg" style={{ background: '#1f2937', color: '#9ca3af' }}>
-                      הוצג: {result.year_introduced}
-                    </span>
-                  )}
-                  {result.serial_year && (
-                    <span className="text-xs px-2 py-1 rounded-lg" style={{ background: '#1f2937', color: '#9ca3af' }}>
-                      שנת ייצור משוערת: {result.serial_year}
-                    </span>
-                  )}
-                  {result.still_in_production != null && (
-                    <span
-                      className="text-xs px-2 py-1 rounded-lg font-semibold"
-                      style={{
-                        background: result.still_in_production
-                          ? 'rgba(34,197,94,0.15)'
-                          : 'rgba(239,68,68,0.15)',
-                        color: result.still_in_production ? '#22c55e' : '#ef4444',
-                      }}
-                    >
-                      {result.still_in_production ? 'בייצור' : 'הופסק'}
-                    </span>
-                  )}
+              {/* Watch image (feature 1) + brand/model text */}
+              <div className="flex items-start gap-4 flex-1">
+                {displayImage && (
+                  <img
+                    src={displayImage}
+                    alt={`${result.brand} ${result.model}`}
+                    className="rounded-xl object-cover flex-shrink-0"
+                    style={{ width: 80, height: 80, border: `1px solid ${BORDER}` }}
+                  />
+                )}
+                <div className="space-y-1 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-2xl font-bold" style={{ color: GOLD }}>
+                      {result.brand} {result.model}
+                    </h2>
+                    {result.nickname && (
+                      <span
+                        className="px-2 py-0.5 rounded-full text-xs font-medium"
+                        style={{ background: 'rgba(212,175,55,0.15)', color: GOLD }}
+                      >
+                        "{result.nickname}"
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-lg font-mono" style={{ color: '#d1d5db' }}>
+                    Ref. {result.reference}
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {result.year_introduced && (
+                      <span className="text-xs px-2 py-1 rounded-lg" style={{ background: '#1f2937', color: '#9ca3af' }}>
+                        הוצג: {result.year_introduced}
+                      </span>
+                    )}
+                    {result.serial_year && (
+                      <span className="text-xs px-2 py-1 rounded-lg" style={{ background: '#1f2937', color: '#9ca3af' }}>
+                        שנת ייצור משוערת: {result.serial_year}
+                      </span>
+                    )}
+                    {result.still_in_production != null && (
+                      <span
+                        className="text-xs px-2 py-1 rounded-lg font-semibold"
+                        style={{
+                          background: result.still_in_production
+                            ? 'rgba(34,197,94,0.15)'
+                            : 'rgba(239,68,68,0.15)',
+                          color: result.still_in_production ? '#22c55e' : '#ef4444',
+                        }}
+                      >
+                        {result.still_in_production ? 'בייצור' : 'הופסק'}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -768,7 +906,6 @@ export default function WatchIdentifier() {
           <div className="flex flex-wrap gap-3 pt-2">
             <button
               onClick={() => {
-                // Build rich notes from all available specs
                 const noteLines: string[] = []
                 if (result.dial_description) noteLines.push(`לוח: ${result.dial_description}`)
                 if (result.bezel) noteLines.push(`לוח הרים: ${result.bezel}`)
@@ -807,6 +944,21 @@ export default function WatchIdentifier() {
             >
               הוסף למלאי
             </button>
+
+            {/* Report button (feature 3) */}
+            <button
+              onClick={() => generateReport(result, displayImage)}
+              className="flex-1 py-3 rounded-xl font-semibold transition-all hover:opacity-80 flex items-center justify-center gap-2"
+              style={{
+                background: '#1f2937',
+                color: '#d1d5db',
+                border: `1px solid ${BORDER}`,
+                minWidth: '120px',
+              }}
+            >
+              📄 דוח
+            </button>
+
             <button
               onClick={() =>
                 navigate('/price-scout', {
@@ -822,6 +974,19 @@ export default function WatchIdentifier() {
               }}
             >
               חפש מחיר בשוק
+            </button>
+          </div>
+
+          {/* Clear cache link */}
+          <div className="flex justify-end pt-1">
+            <button
+              onClick={() => {
+                clearWatchCache()
+              }}
+              className="text-xs transition-all hover:opacity-80"
+              style={{ color: '#4b5563', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              נקה שמור
             </button>
           </div>
         </div>
