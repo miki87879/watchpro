@@ -108,6 +108,43 @@ async def _fetch_rates() -> Dict[str, float]:
     return _cache
 
 
+@router.get("/currency/historical")
+async def get_historical_rate(currency: str = "USD", date: str = ""):
+    """
+    Return the exchange rate 1 {currency} → ILS for a specific historical date.
+    Uses fawazahmed0/exchange-api (free, historical, no key required).
+    """
+    if currency == "ILS":
+        return {"currency": "ILS", "date": date, "rate_to_ils": 1.0, "source": "n/a"}
+
+    cur = currency.lower()
+    import datetime as _dt
+    # Validate and normalise date
+    try:
+        date_obj = _dt.date.fromisoformat(date) if date else _dt.date.today()
+        date_str = date_obj.isoformat()
+    except ValueError:
+        date_str = _dt.date.today().isoformat()
+
+    urls = [
+        f"https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@{date_str}/v1/currencies/{cur}.json",
+        f"https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/{cur}.json",
+    ]
+    for url in urls:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.get(url)
+            if r.status_code == 200:
+                rate = r.json().get(cur, {}).get("ils")
+                if rate:
+                    src = "historical" if "latest" not in url else "latest"
+                    return {"currency": currency, "date": date_str, "rate_to_ils": float(rate), "source": src}
+        except Exception:
+            continue
+
+    return {"currency": currency, "date": date_str, "rate_to_ils": None, "source": "unavailable"}
+
+
 @router.get("/currency/rates")
 async def get_rates(bust: str = ""):
     """Return live rates. Pass ?bust=1 to force-refresh cache."""

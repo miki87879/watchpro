@@ -125,6 +125,10 @@ export default function AddWatch() {
   const [autoFillSuccess, setAutoFillSuccess] = useState<{ brand: string; model: string } | null>(null)
   const [autoFillError, setAutoFillError] = useState<string | null>(null)
 
+  // Historical ILS rate preview
+  const [ilsRate, setIlsRate] = useState<{ rate: number; date: string; source: string } | null>(null)
+  const [ilsRateLoading, setIlsRateLoading] = useState(false)
+
   // Document upload state
   const [docFiles, setDocFiles] = useState<DocFile[]>([])
   const docInputRef = useRef<HTMLInputElement>(null)
@@ -187,6 +191,33 @@ export default function AddWatch() {
   const set = (key: keyof typeof form, value: string | boolean) => {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
+
+  // Fetch historical ILS rate when purchase date + currency change
+  useEffect(() => {
+    const currency = form.price_currency
+    const date = form.purchase_date
+    const price = parseFloat(form.purchase_price)
+
+    if (!date || !currency || currency === 'ILS' || !price || price <= 0) {
+      setIlsRate(null)
+      return
+    }
+
+    let cancelled = false
+    setIlsRateLoading(true)
+    api.get('/api/currency/historical', { params: { currency, date } })
+      .then((res) => {
+        if (!cancelled && res.data.rate_to_ils) {
+          setIlsRate({ rate: res.data.rate_to_ils, date: res.data.date, source: res.data.source })
+        } else if (!cancelled) {
+          setIlsRate(null)
+        }
+      })
+      .catch(() => { if (!cancelled) setIlsRate(null) })
+      .finally(() => { if (!cancelled) setIlsRateLoading(false) })
+
+    return () => { cancelled = true }
+  }, [form.purchase_date, form.price_currency, form.purchase_price])
 
   // Auto-fill handler
   const handleAutoFill = async () => {
@@ -904,6 +935,40 @@ export default function AddWatch() {
                 />
               </div>
             </div>
+
+            {/* Historical ILS rate preview */}
+            {(ilsRateLoading || ilsRate) && form.price_currency !== 'ILS' && form.purchase_price && form.purchase_date && (
+              <div
+                className="rounded-xl p-4 flex items-center gap-3"
+                style={{ background: 'rgba(212,175,55,0.07)', border: '1px solid rgba(212,175,55,0.25)' }}
+              >
+                <span style={{ fontSize: 20 }}>📅</span>
+                {ilsRateLoading ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin" style={{ color: '#d4af37' }} />
+                    <span className="text-xs" style={{ color: '#9ca3af' }}>שולף שער היסטורי...</span>
+                  </div>
+                ) : ilsRate ? (
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs" style={{ color: '#9ca3af' }}>
+                        שער ב-{new Date(ilsRate.date).toLocaleDateString('he-IL', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        {ilsRate.source === 'latest' && <span className="mr-1 text-xs" style={{ color: '#f59e0b' }}>(שער נוכחי)</span>}
+                      </span>
+                      <span className="text-xs font-mono" style={{ color: '#d4af37' }}>
+                        1 {form.price_currency} = ₪{ilsRate.rate.toFixed(4)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-xs font-semibold" style={{ color: '#d1d5db' }}>מחיר קנייה בשקלים</span>
+                      <span className="text-base font-bold" style={{ color: '#d4af37' }}>
+                        ₪{Math.round(parseFloat(form.purchase_price) * ilsRate.rate).toLocaleString('he-IL')}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
 
             {/* Status */}
             <div
