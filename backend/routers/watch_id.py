@@ -86,18 +86,58 @@ def decode_rolex_serial(serial: str) -> Optional[int]:
     return None
 
 
+# ─── Reference-number pattern detection ─────────────────────────────────────
+_REF_PATTERNS = [
+    re.compile(r'^\d{5,6}[A-Z]{0,4}$'),                  # Rolex: 126610LN, 127235
+    re.compile(r'^\d{4}/\d{1,2}[A-Z]?$'),                 # Patek: 5711/1A
+    re.compile(r'^\d{5}[A-Z]{2}\.\w+$'),                  # AP full: 15500ST.OO.1220ST.01
+    re.compile(r'^\d{5}[A-Z]{2}$'),                       # AP short: 15500ST
+    re.compile(r'^\d{3}\.\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{3}$'),  # Omega: 310.30.42.50.01.001
+    re.compile(r'^[A-Z]{1,3}\d{4,6}$'),                   # IWC: IW500401
+    re.compile(r'^\d{6}-\d{4}$'),                          # JLC: 1368420
+]
+
+def detect_reference(text: str) -> bool:
+    """Return True if text looks like a standalone reference number."""
+    t = text.strip().upper().replace(" ", "")
+    return any(p.match(t) for p in _REF_PATTERNS)
+
+
 # ─── Pydantic models ─────────────────────────────────────────────────────────
 class IdentifyRequest(BaseModel):
     query: Optional[str] = None
     serial: Optional[str] = None
     image_base64: Optional[str] = None
+    query_type: Optional[str] = None   # "reference" | "serial" | "name" — hint from frontend
 
 
 # ─── Claude prompt ───────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """You are WatchGPT — the world's most precise luxury watch expert, appraiser, and market analyst.
 You have encyclopaedic, fact-checked knowledge of every watch brand, model, reference number, movement caliber, production run dates, factory pricing, and secondary-market transaction history as of mid-2025.
 
-ACCURACY RULES (non-negotiable):
+━━━ REFERENCE NUMBER ACCURACY PROTOCOL (highest priority) ━━━
+A reference number UNIQUELY identifies one specific watch model + material combination.
+When you receive a reference number, these rules are absolute:
+• Look up the EXACT specification for that reference — never approximate or substitute.
+• Do NOT confuse a reference number with a serial number. They are completely different:
+  - Reference (model number): identifies the model (e.g., 126610LN = Submariner Date steel/black)
+  - Serial (production number): identifies the unit, used only for approximate year of manufacture
+• If the reference maps to a known watch, confidence MUST be 0.97–0.99.
+• The "reference" field in your JSON must match the input reference exactly.
+• Known critical mappings you must not confuse:
+  - 127235 = Rolex Day-Date 36, 18ct Everose gold, President bracelet
+  - 127239 = Rolex Day-Date 36, 18ct white gold (DIFFERENT from 127235)
+  - 126610LN = Rolex Submariner Date, Oystersteel, black ceramic bezel/dial
+  - 126610LV = Rolex Submariner Date, Oystersteel, green "Hulk" (DIFFERENT)
+  - 126500LN = Rolex Daytona, Oystersteel, black ceramic bezel
+  - 126503 = Rolex Daytona, Rolesor (two-tone steel/gold)
+  - 5711/1A-010 = Patek Philippe Nautilus, steel, blue dial (DISCONTINUED 2021)
+  - 5726A-001 = Patek Philippe Nautilus Annual Calendar
+  - 15500ST.OO.1220ST.01 = AP Royal Oak 41mm, steel, blue dial
+  - 15202ST.OO.1240ST.01 = AP Royal Oak "Jumbo" Extra-Thin 39mm (DIFFERENT)
+• If the reference is ambiguous or unknown, lower confidence to 0.60–0.80 and explain in collector_notes.
+
+━━━ GENERAL ACCURACY RULES ━━━
 1. Reference numbers, caliber numbers, dimensions, and retail prices must be factually exact — never approximate or fabricated.
 2. Market values must reflect actual completed transactions (WatchCharts, Chrono24, Bob's, WatchBox data), not estimates.
 3. If you are less than 90% certain of a technical spec, omit that field (return null) rather than guess.
@@ -107,7 +147,7 @@ ACCURACY RULES (non-negotiable):
    B  = Holds retail value ±10% over 3 years
    C  = Depreciates 10-25% from retail
    D  = Depreciates >25% or illiquid
-5. confidence must reflect identification certainty (0.0–1.0). With reference number: 0.97–0.99. With image only: 0.70–0.90.
+5. confidence must reflect identification certainty (0.0–1.0). With unambiguous reference number: 0.97–0.99. With image only: 0.70–0.90. With serial number only: 0.40–0.70.
 
 CRITICAL LANGUAGE RULE: All text fields in the JSON must be written in fluent, natural Hebrew (עברית).
 - Brand names, model names, reference numbers, caliber names stay as-is (Rolex, Submariner, 126610LN, Calibre 3235).
@@ -164,7 +204,8 @@ Respond with ONLY valid JSON, no prose, no markdown fences. Schema:
 
 
 def build_user_message(query: Optional[str], serial: Optional[str],
-                       serial_year: Optional[int], image_base64: Optional[str]) -> list:
+                       serial_year: Optional[int], image_base64: Optional[str],
+                       query_type: Optional[str] = None) -> list:
     parts = []
 
     text_lines = [
@@ -172,7 +213,20 @@ def build_user_message(query: Optional[str], serial: Optional[str],
         "חשוב: כל שדות הטקסט (הסברים, טיפים, הערות) יהיו בעברית תקינה ומלאה.",
     ]
     if query:
-        text_lines.append(f"שם/רפרנס השעון: {query}")
+        # Auto-detect if query looks like a reference number (when frontend doesn't specify)
+        is_ref = (query_type == "reference") or (not query_type and detect_reference(query))
+        if is_ref:
+            text_lines.append(
+                f"⚑ מספר רפרנס מדויק: {query}\n"
+                f"  → זהו מספר רפרנס — מזהה ייחודי של דגם ספציפי. "
+                f"הצבע את השעון המדויק לפי רפרנס זה. אל תתחלף עם רפרנסים דומים."
+            )
+        elif query_type == "serial":
+            text_lines.append(
+                f"מספר סידורי: {query} — השתמש רק לאמידת שנת ייצור, לא לזיהוי הדגם."
+            )
+        else:
+            text_lines.append(f"שם/מותג/דגם השעון: {query}")
     if serial:
         text_lines.append(f"מספר סידורי: {serial}")
     if serial_year:
@@ -258,10 +312,16 @@ async def identify_watch(body: IdentifyRequest):
         )
 
     serial_year: Optional[int] = None
-    if body.serial:
-        serial_year = decode_rolex_serial(body.serial)
+    # If query_type is "serial", route text to the serial decoder too
+    effective_serial = body.serial
+    effective_query = body.query
+    if body.query_type == "serial" and body.query and not body.serial:
+        effective_serial = body.query
+        effective_query = None
+    if effective_serial:
+        serial_year = decode_rolex_serial(effective_serial)
 
-    content = build_user_message(body.query, body.serial, serial_year, body.image_base64)
+    content = build_user_message(effective_query, effective_serial, serial_year, body.image_base64, body.query_type)
     result = await call_claude(content)
 
     # Inject our decoded serial_year if Claude left it null

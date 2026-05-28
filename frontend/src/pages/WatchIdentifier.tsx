@@ -88,6 +88,7 @@ export default function WatchIdentifier() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [query, setQuery] = useState('')
+  const [queryType, setQueryType] = useState<'reference' | 'serial' | 'name'>('reference')
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -97,6 +98,13 @@ export default function WatchIdentifier() {
   const [authOpen, setAuthOpen] = useState(false)
   const [notesOpen, setNotesOpen] = useState(false)
   const [dots, setDots] = useState('.')
+
+  const INPUT_MODES = [
+    { key: 'reference' as const, label: '# רפרנס', placeholder: 'לדוגמה: 126610LN / 5711/1A / 15500ST / 127235' },
+    { key: 'serial'    as const, label: '🔢 סידורי', placeholder: 'לדוגמה: T123456 / G234567 / 2T654321 (Rolex)' },
+    { key: 'name'      as const, label: '📝 שם חופשי', placeholder: 'לדוגמה: Rolex Submariner, Patek Nautilus' },
+  ]
+  const currentMode = INPUT_MODES.find(m => m.key === queryType)!
 
   // Animated dots for loading
   const startDots = () => {
@@ -149,9 +157,10 @@ export default function WatchIdentifier() {
       }
 
       const payload = {
-        query: query.trim() || null,
-        serial: null,
+        query: queryType !== 'serial' ? query.trim() || null : null,
+        serial: queryType === 'serial' ? query.trim() || null : null,
         image_base64: imageBase64,
+        query_type: query.trim() ? queryType : null,
       }
 
       const apiBase = import.meta.env.VITE_API_URL ?? ''
@@ -218,15 +227,30 @@ export default function WatchIdentifier() {
       >
         {/* Text input */}
         <div>
-          <label className="block text-sm font-medium mb-2" style={{ color: '#d1d5db' }}>
-            שם שעון, מספר רפרנס או מספר סידורי
-          </label>
+          {/* Input type selector */}
+          <div className="flex gap-1 p-1 rounded-xl mb-3" style={{ background: '#0d1117' }}>
+            {INPUT_MODES.map(m => (
+              <button
+                key={m.key}
+                onClick={() => { setQueryType(m.key); setQuery('') }}
+                className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
+                style={{
+                  background: queryType === m.key ? '#1f2937' : 'transparent',
+                  color: queryType === m.key ? GOLD : '#6b7280',
+                  border: queryType === m.key ? `1px solid rgba(212,175,55,0.3)` : '1px solid transparent',
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && identify()}
-            placeholder="לדוגמה: Rolex Submariner 126610LN"
+            placeholder={currentMode.placeholder}
             className="w-full rounded-xl px-4 py-3 text-white placeholder-gray-500 outline-none transition-all"
             style={{
               background: '#0d1117',
@@ -238,12 +262,13 @@ export default function WatchIdentifier() {
           />
         </div>
 
-        {/* Quick suggestions */}
+        {/* Quick suggestions — only for reference mode */}
+        {queryType === 'reference' && (
         <div className="flex flex-wrap gap-2">
           {QUICK.map((q) => (
             <button
               key={q}
-              onClick={() => setQuery(q)}
+              onClick={() => { setQueryType('reference'); setQuery(q) }}
               className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80"
               style={{
                 background: '#1f2937',
@@ -255,6 +280,7 @@ export default function WatchIdentifier() {
             </button>
           ))}
         </div>
+        )}
 
         {/* Drag & drop zone */}
         {!imagePreview ? (
