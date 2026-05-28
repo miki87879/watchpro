@@ -341,27 +341,37 @@ def build_user_message(query: Optional[str], serial: Optional[str],
 
 
 def _parse_claude_response(raw_text: str) -> dict:
+    """Parse Claude's response text into a dict. Handles markdown fences, leading text, etc."""
     raw_text = raw_text.strip()
-    # Strip markdown code fences if Claude wrapped the JSON anyway
-    if raw_text.startswith("```"):
-        raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
-        raw_text = re.sub(r"\s*```$", "", raw_text)
+
+    # 1. Strip markdown code fences (handles leading whitespace before ``` too)
+    raw_text = re.sub(r"^[\s\S]*?```(?:json)?\s*", "", raw_text, count=1) if "```" in raw_text else raw_text
+    raw_text = re.sub(r"\s*```[\s\S]*$", "", raw_text)
+    raw_text = raw_text.strip()
+
+    # 2. Direct parse
     try:
         return json.loads(raw_text)
     except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", raw_text, re.DOTALL)
-        if m:
-            try:
-                return json.loads(m.group())
-            except Exception:
-                pass
-        raise HTTPException(
-            status_code=422,
-            detail=f"Claude returned non-JSON response: {raw_text[:300]}",
-        )
+        pass
+
+    # 3. Extract first {...} block (handles leading prose before JSON)
+    m = re.search(r"\{[\s\S]*\}", raw_text)
+    if m:
+        try:
+            return json.loads(m.group())
+        except Exception:
+            pass
+
+    # 4. Give up
+    raise HTTPException(
+        status_code=422,
+        detail=f"Claude returned non-JSON response: {raw_text[:400]}",
+    )
 
 
-async def call_claude(content: list) -> dict:
+async def call_claude(content: list, *, retries: int = 2) -> dict:
+    """Call Claude API with automatic retry on transient failures."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
@@ -375,9 +385,25 @@ async def call_claude(content: list) -> dict:
             messages=[{"role": "user", "content": content}],
         )
 
-    # Run blocking Anthropic call in a thread so the event loop stays free
-    response = await asyncio.to_thread(_sync_call)
-    return _parse_claude_response(response.content[0].text)
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            response = await asyncio.to_thread(_sync_call)
+            if not response.content:
+                raise ValueError("Empty response from Claude")
+            return _parse_claude_response(response.content[0].text)
+        except HTTPException:
+            raise  # validation errors → no retry
+        except Exception as exc:
+            last_exc = exc
+            print(f"[call_claude] attempt {attempt + 1} failed: {exc}")
+            if attempt < retries:
+                await asyncio.sleep(1.5 ** attempt)  # 1s, 1.5s backoff
+
+    raise HTTPException(
+        status_code=503,
+        detail=f"שגיאה זמנית בשירות הזיהוי. נסה שוב בעוד מספר שניות. ({last_exc})",
+    )
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────

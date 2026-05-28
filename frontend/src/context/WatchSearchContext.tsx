@@ -232,10 +232,13 @@ export function WatchSearchProvider({ children }: { children: ReactNode }) {
         .catch((e: unknown) => {
           if (e instanceof Error && e.name === 'AbortError') return
           const msg = e instanceof Error ? e.message : String(e)
-          const friendly =
-            msg.includes('422') || msg.includes('non-JSON')
-              ? 'לא ניתן לזהות את השעון. נסה לספק פרטים מדויקים יותר.'
-              : msg
+          const isParseError = msg.includes('422') || msg.includes('non-JSON')
+          const isTransient  = msg.includes('503') || msg.includes('502') || msg.includes('זמנית')
+          const friendly = isParseError
+            ? 'לא ניתן לזהות את השעון. נסה שוב או ספק פרטים מדויקים יותר.'
+            : isTransient
+            ? 'שגיאה זמנית בשרת — נסה שוב בעוד כמה שניות.'
+            : msg
           setState((prev) => ({
             ...prev,
             loading: false,

@@ -679,14 +679,24 @@ export default function WatchIdentifier() {
           style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)' }}
         >
           <AlertTriangle size={20} color="#ef4444" className="flex-shrink-0 mt-0.5" />
-          <div>
+          <div className="flex-1">
             <p className="font-semibold text-sm" style={{ color: '#ef4444' }}>
               לא ניתן לזהות
             </p>
             <p className="text-sm mt-0.5" style={{ color: '#9ca3af' }}>{error}</p>
-            <p className="text-xs mt-2" style={{ color: '#6b7280' }}>
-              נסה לספק מספר רפרנס מדויק, שם מותג ודגם, או תמונה ברורה יותר.
-            </p>
+            <div className="flex items-center gap-3 mt-3">
+              <button
+                onClick={identify}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
+              >
+                <RefreshCw size={12} />
+                נסה שוב
+              </button>
+              <p className="text-xs" style={{ color: '#6b7280' }}>
+                או ספק מספר רפרנס מדויק, שם מותג ודגם, או תמונה ברורה יותר.
+              </p>
+            </div>
           </div>
         </div>
       )}
