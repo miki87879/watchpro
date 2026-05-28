@@ -404,38 +404,62 @@ export default function WatchDetail() {
 
           {/* ─── Net Cost Breakdown ─── */}
           {watch.purchase_price > 0 && (watch.tax_refund || (watch.import_tax ?? 0) > 0 || watch.purchase_price_ils) && (() => {
-            // Use stored historical rate for purchase; live rate for taxes (no historical stored for those)
-            const purchaseILS = watch.purchase_price_ils
-              ?? toILS(watch.purchase_price, watch.price_currency)
-            const refundILS = (watch.tax_refund && watch.tax_refund_amount)
-              ? toILS(watch.tax_refund_amount, watch.tax_refund_currency)
+            const histRate = watch.purchase_rate_to_ils   // 1 price_currency → ILS at purchase date
+
+            // Each component in ILS — use stored historical rate for same-currency items
+            const isSameCur = (c?: string) => c === watch.price_currency
+            const grossILS  = histRate ? watch.purchase_price * histRate : null
+
+            const refundILS = (watch.tax_refund && (watch.tax_refund_amount ?? 0) > 0)
+              ? isSameCur(watch.tax_refund_currency) && histRate
+                ? (watch.tax_refund_amount ?? 0) * histRate   // same currency → exact historical
+                : toILS(watch.tax_refund_amount, watch.tax_refund_currency) // diff currency → live approx
               : null
+
             const importILS = (watch.import_tax ?? 0) > 0
-              ? toILS(watch.import_tax!, watch.import_tax_currency)
+              ? isSameCur(watch.import_tax_currency) && histRate
+                ? (watch.import_tax ?? 0) * histRate
+                : toILS(watch.import_tax, watch.import_tax_currency)
               : null
-            const netILS = purchaseILS != null
-              ? purchaseILS - (refundILS ?? 0) + (importILS ?? 0)
-              : null
+
+            // Definitive net cost — authoritative value computed by backend with all historical rates
+            const netILS = watch.purchase_price_ils
+
             const fmtILS = (n: number | null | undefined) =>
-              n != null ? `₪${Math.round(n).toLocaleString('he-IL')}` : '—'
+              n != null ? `₪${Math.round(n).toLocaleString('he-IL')}` : null
+
+            const hasAdjustments = watch.tax_refund || (watch.import_tax ?? 0) > 0
+
             return (
               <div
                 className="rounded-xl p-5"
                 style={{ background: '#111827', border: '1px solid #1f2937' }}
               >
-                <div className="flex items-center gap-2 mb-3">
-                  <Calculator size={14} color="#9ca3af" />
-                  <h3 className="text-sm font-semibold text-gray-400">עלות בסיס נטו</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Calculator size={14} color="#9ca3af" />
+                    <h3 className="text-sm font-semibold text-gray-400">
+                      {hasAdjustments ? 'עלות בסיס נטו' : 'עלות קנייה בשקלים'}
+                    </h3>
+                  </div>
+                  {hasAdjustments && (
+                    <button
+                      onClick={refreshIlsRate}
+                      className="text-xs px-2 py-0.5 rounded-lg transition-all hover:opacity-80"
+                      style={{ background: 'rgba(212,175,55,0.15)', color: '#d4af37', border: '1px solid rgba(212,175,55,0.3)' }}
+                    >
+                      עדכן חישוב
+                    </button>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  {/* Purchase price */}
+
+                <div className="space-y-2 text-sm">
+                  {/* Gross purchase */}
                   <div className="flex items-center justify-between py-1 border-b border-gray-800">
-                    <span className="text-xs text-gray-500">מחיר קנייה</span>
-                    <div className="text-right">
-                      <span className="text-sm text-white">{fmtPrice(watch.purchase_price, watch.price_currency)}</span>
-                      {purchaseILS != null && (
-                        <span className="text-xs text-gray-500 mr-2">= {fmtILS(purchaseILS)}</span>
-                      )}
+                    <span className="text-xs text-gray-500">מחיר קנייה ברוטו</span>
+                    <div className="flex items-center gap-2">
+                      {grossILS && <span className="text-xs text-gray-500">{fmtILS(grossILS)}</span>}
+                      <span className="text-white font-medium">{fmtPrice(watch.purchase_price, watch.price_currency)}</span>
                     </div>
                   </div>
 
@@ -445,13 +469,13 @@ export default function WatchDetail() {
                       <span className="text-xs text-gray-500">
                         החזר מע"מ{watch.tax_refund_country ? ` (${watch.tax_refund_country})` : ''}
                       </span>
-                      <div className="text-right">
-                        <span className="text-sm" style={{ color: '#10b981' }}>
+                      <div className="flex items-center gap-2">
+                        {refundILS && (
+                          <span className="text-xs text-gray-500">-{fmtILS(refundILS)}</span>
+                        )}
+                        <span style={{ color: '#10b981' }} className="font-medium">
                           -{fmtPrice(watch.tax_refund_amount, watch.tax_refund_currency)}
                         </span>
-                        {refundILS != null && (
-                          <span className="text-xs text-gray-500 mr-2">= -{fmtILS(refundILS)}</span>
-                        )}
                       </div>
                     </div>
                   )}
@@ -460,30 +484,32 @@ export default function WatchDetail() {
                   {(watch.import_tax ?? 0) > 0 && (
                     <div className="flex items-center justify-between py-1 border-b border-gray-800">
                       <span className="text-xs text-gray-500">מכס / מע"מ יבוא</span>
-                      <div className="text-right">
-                        <span className="text-sm" style={{ color: '#f87171' }}>
+                      <div className="flex items-center gap-2">
+                        {importILS && (
+                          <span className="text-xs text-gray-500">+{fmtILS(importILS)}</span>
+                        )}
+                        <span style={{ color: '#f87171' }} className="font-medium">
                           +{fmtPrice(watch.import_tax, watch.import_tax_currency)}
                         </span>
-                        {importILS != null && (
-                          <span className="text-xs text-gray-500 mr-2">= +{fmtILS(importILS)}</span>
-                        )}
                       </div>
                     </div>
                   )}
 
-                  {/* NET total */}
+                  {/* Net total — always from backend (authoritative, uses historical rates) */}
                   {netILS != null && (
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="text-xs font-semibold text-white">עלות נטו בשקלים</span>
+                    <div className="flex items-center justify-between pt-2">
+                      <span className="text-sm font-bold text-white">עלות נטו בשקלים</span>
                       <span className="text-base font-bold" style={{ color: '#d4af37' }}>
-                        {fmtILS(netILS)}
+                        ₪{Math.round(netILS).toLocaleString('he-IL')}
                       </span>
                     </div>
                   )}
 
-                  {(watch.tax_refund || (watch.import_tax ?? 0) > 0) && rates && (
-                    <p className="text-xs text-gray-600 mt-1">
-                      * מיסים/החזרים מומרים לפי שער עדכני; מחיר קנייה לפי שער ביום הרכישה
+                  {/* Rate info */}
+                  {histRate && (
+                    <p className="text-xs pt-1" style={{ color: '#4b5563' }}>
+                      שער ביום הרכישה: 1 {watch.price_currency} = ₪{histRate.toLocaleString('he-IL', { maximumFractionDigits: 4 })}
+                      {hasAdjustments && ' · כל הרכיבים מומרים לפי שער היסטורי'}
                     </p>
                   )}
                 </div>

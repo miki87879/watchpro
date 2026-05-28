@@ -62,13 +62,47 @@ def _fetch_ils_rate(currency: str, date_obj: Optional[datetime]) -> Optional[flo
 
 
 def _update_ils_fields(watch: "models.Watch") -> None:
-    """Fetch historical ILS rate for watch's purchase date/currency and persist on the watch object."""
+    """
+    Calculate net cost in ILS and persist on the watch object.
+
+    Net cost = (purchase_price × purchase_rate)
+               - (tax_refund_amount × refund_rate)   ← tourist VAT back
+               + (import_tax × import_rate)           ← customs/VAT paid in Israel
+
+    All rates fetched at the purchase date (historical) so every component
+    is priced consistently on the same day.
+
+    Stores:
+      purchase_rate_to_ils = 1 {price_currency} → ILS at purchase date (gross rate)
+      purchase_price_ils   = net cost in ILS after all tax adjustments
+    """
     if not watch.purchase_price or watch.purchase_price <= 0:
         return
-    rate = _fetch_ils_rate(watch.price_currency or "USD", watch.purchase_date)
-    if rate is not None:
-        watch.purchase_rate_to_ils = round(rate, 4)
-        watch.purchase_price_ils = round(watch.purchase_price * rate, 2)
+
+    # Use purchase_date for ALL conversions (consistent historical snapshot)
+    d = watch.purchase_date  # datetime | None
+
+    # ── 1. Gross purchase in ILS ─────────────────────────────────────────────
+    rate = _fetch_ils_rate(watch.price_currency or "USD", d)
+    if rate is None:
+        return
+    watch.purchase_rate_to_ils = round(rate, 6)
+    net_ils = watch.purchase_price * rate
+
+    # ── 2. Subtract tourist tax refund ───────────────────────────────────────
+    if watch.tax_refund and (watch.tax_refund_amount or 0) > 0 and watch.tax_refund_currency:
+        refund_rate = _fetch_ils_rate(watch.tax_refund_currency, d)
+        if refund_rate is not None:
+            net_ils -= (watch.tax_refund_amount or 0) * refund_rate
+
+    # ── 3. Add import duties / VAT paid in Israel ─────────────────────────────
+    if (watch.import_tax or 0) > 0:
+        import_cur = watch.import_tax_currency or "ILS"
+        import_rate = _fetch_ils_rate(import_cur, d)
+        if import_rate is not None:
+            net_ils += (watch.import_tax or 0) * import_rate
+
+    watch.purchase_price_ils = round(net_ils, 2)
 
 def watch_to_dict(watch: models.Watch, include_relations: bool = False) -> dict:
     primary_photo = None
