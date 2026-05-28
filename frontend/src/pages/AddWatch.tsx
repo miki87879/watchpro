@@ -346,14 +346,13 @@ export default function AddWatch() {
         await api.post(`/api/inventory/${watchId}/photos`, photoData)
       }
 
-      // Upload documents
+      // Upload documents — use /api/inventory/{id}/documents so they appear in WatchDetail
       for (const doc of docFiles) {
         const docData = new FormData()
         docData.append('file', doc.file)
-        docData.append('category', doc.category)
-        docData.append('watch_id', watchId.toString())
+        docData.append('doc_type', doc.category)   // field name matches inventory endpoint
         try {
-          await api.post('/api/documents/upload', docData)
+          await api.post(`/api/inventory/${watchId}/documents`, docData)
         } catch {
           toast.error(`שגיאה בהעלאת מסמך: ${doc.file.name}`)
         }
