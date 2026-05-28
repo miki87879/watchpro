@@ -11,6 +11,14 @@ import api from '../api/client'
 import { Watch as WatchType } from '../types'
 
 const statusLabel: Record<string, string> = { available: 'זמין', sold: 'נמכר', reserved: 'שמור' }
+
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$', ILS: '₪', EUR: '€', GBP: '£', CHF: 'CHF', JPY: '¥',
+  AUD: 'A$', CAD: 'C$', HKD: 'HK$', SGD: 'S$', NOK: 'kr', SEK: 'kr', DKK: 'kr',
+}
+const symOf = (currency?: string) => CURRENCY_SYMBOLS[currency || 'USD'] ?? currency ?? '$'
+const fmtPrice = (n: number | undefined | null, currency?: string) =>
+  n != null ? `${symOf(currency)}${n.toLocaleString('en-US')}` : '—'
 const statusColors: Record<string, { text: string; bg: string }> = {
   available: { text: '#10b981', bg: 'rgba(16,185,129,0.12)' },
   sold: { text: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
@@ -305,12 +313,14 @@ export default function WatchDetail() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="text-xs text-gray-500 mb-0.5">מחיר קנייה</div>
-                <div className="text-lg font-bold text-white">${watch.purchase_price?.toLocaleString()}</div>
+                <div className="text-lg font-bold text-white">
+                  {fmtPrice(watch.purchase_price, watch.price_currency)}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500 mb-0.5">{watch.status === 'sold' ? 'מחיר מכירה' : 'מחיר מבוקש'}</div>
                 <div className="text-lg font-bold" style={{ color: '#d4af37' }}>
-                  ${(watch.status === 'sold' ? watch.sold_price : watch.asking_price)?.toLocaleString()}
+                  {fmtPrice(watch.status === 'sold' ? watch.sold_price : watch.asking_price, watch.price_currency)}
                 </div>
               </div>
             </div>
@@ -324,7 +334,7 @@ export default function WatchDetail() {
                   {watch.status === 'sold' ? 'רווח ממומש' : 'רווח פוטנציאלי'}
                 </span>
                 <span className="text-sm font-bold" style={{ color: profit >= 0 ? '#10b981' : '#ef4444' }}>
-                  {profit >= 0 ? '+' : ''}${profit.toLocaleString()}
+                  {profit >= 0 ? '+' : ''}{fmtPrice(profit, watch.price_currency)}
                 </span>
               </div>
             )}

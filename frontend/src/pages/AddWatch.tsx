@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../api/client'
-import { Watch as WatchType } from '../types'
+import { Watch as WatchType, WatchPhoto } from '../types'
 import { useCurrency } from '../context/CurrencyContext'
 
 const initialForm = {
@@ -117,6 +117,7 @@ export default function AddWatch() {
   const [form, setForm] = useState(initialForm)
   const [files, setFiles] = useState<File[]>([])
   const [previews, setPreviews] = useState<string[]>([])
+  const [existingPhotos, setExistingPhotos] = useState<WatchPhoto[]>([])
   const [loading, setLoading] = useState(false)
   const [fetchingWatch, setFetchingWatch] = useState(isEdit)
 
@@ -165,6 +166,8 @@ export default function AddWatch() {
           location: w.location || 'home_safe',
           location_details: w.location_details || '',
         })
+        // Load existing photos for edit mode
+        if (w.photos && w.photos.length > 0) setExistingPhotos(w.photos)
       })
       .catch(() => toast.error('שגיאה בטעינת השעון'))
       .finally(() => setFetchingWatch(false))
@@ -202,13 +205,23 @@ export default function AddWatch() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.webp'] },
+    // Accept HEIC/HEIF (iPhone) — backend auto-converts to JPEG
+    accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'] },
     multiple: true,
   })
 
   const removeFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index))
     setPreviews((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const deleteExistingPhoto = async (photoId: number) => {
+    if (!id) return
+    try {
+      await api.delete(`/api/inventory/${id}/photos/${photoId}`)
+      setExistingPhotos(prev => prev.filter(p => p.id !== photoId))
+      toast.success('תמונה נמחקה')
+    } catch { toast.error('שגיאה במחיקת תמונה') }
   }
 
   const set = (key: keyof typeof form, value: string | boolean) => {
@@ -734,6 +747,43 @@ export default function AddWatch() {
               style={{ background: '#111827', border: '1px solid #1f2937' }}
             >
               <h2 className="text-base font-semibold text-white mb-4">תמונות</h2>
+
+              {/* Existing photos (edit mode) */}
+              {isEdit && existingPhotos.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs text-gray-500 mb-2">תמונות קיימות — לחץ X למחיקה</p>
+                  <div className="grid grid-cols-4 gap-3">
+                    {existingPhotos.map((photo) => (
+                      <div key={photo.id} className="relative group">
+                        <img
+                          src={`${import.meta.env.VITE_API_URL ?? ''}${photo.url}`}
+                          alt=""
+                          className="w-full h-20 object-cover rounded-lg"
+                          style={{ border: photo.is_primary ? '2px solid #d4af37' : '2px solid transparent' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => deleteExistingPhoto(photo.id)}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          style={{ background: '#ef4444' }}
+                        >
+                          <X size={12} color="white" />
+                        </button>
+                        {photo.is_primary && (
+                          <div
+                            className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-xs"
+                            style={{ background: '#d4af37', color: '#0a0e1a' }}
+                          >
+                            ראשית
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* New photos dropzone */}
               <div
                 {...getRootProps()}
                 className="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all"
@@ -745,9 +795,9 @@ export default function AddWatch() {
                 <input {...getInputProps()} />
                 <Upload size={32} color="#6b7280" className="mx-auto mb-3" />
                 <p className="text-gray-400 text-sm">
-                  {isDragActive ? 'שחרר כאן' : 'גרור תמונות לכאן או לחץ לבחירה'}
+                  {isDragActive ? 'שחרר כאן' : isEdit ? 'הוסף תמונות נוספות' : 'גרור תמונות לכאן או לחץ לבחירה'}
                 </p>
-                <p className="text-gray-600 text-xs mt-1">JPG, PNG, WEBP עד 10MB</p>
+                <p className="text-gray-600 text-xs mt-1">JPG, PNG, WEBP, HEIC עד 10MB</p>
               </div>
 
               {previews.length > 0 && (
