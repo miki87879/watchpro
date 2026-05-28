@@ -54,6 +54,17 @@ def watch_to_dict(watch: models.Watch, include_relations: bool = False) -> dict:
         "sold_at": watch.sold_at.isoformat() if watch.sold_at else None,
         "created_at": watch.created_at.isoformat() if watch.created_at else None,
         "primary_photo": primary_photo,
+        # Tax refund
+        "tax_refund": watch.tax_refund or False,
+        "tax_refund_amount": watch.tax_refund_amount,
+        "tax_refund_currency": watch.tax_refund_currency,
+        "tax_refund_country": watch.tax_refund_country,
+        # Import duty
+        "import_tax": watch.import_tax or 0,
+        "import_tax_currency": watch.import_tax_currency or "ILS",
+        # Location
+        "location": watch.location or "home_safe",
+        "location_details": watch.location_details,
     }
 
     if include_relations:
@@ -118,6 +129,17 @@ def create_watch(
     has_papers: bool = Form(False),
     notes: Optional[str] = Form(None),
     purchase_date: Optional[str] = Form(None),
+    # Tax refund
+    tax_refund: bool = Form(False),
+    tax_refund_amount: Optional[float] = Form(None),
+    tax_refund_currency: Optional[str] = Form(None),
+    tax_refund_country: Optional[str] = Form(None),
+    # Import duty
+    import_tax: float = Form(0),
+    import_tax_currency: str = Form("ILS"),
+    # Location
+    location: str = Form("home_safe"),
+    location_details: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -143,6 +165,14 @@ def create_watch(
         has_papers=has_papers,
         notes=notes,
         purchase_date=purchase_date_obj,
+        tax_refund=tax_refund,
+        tax_refund_amount=tax_refund_amount,
+        tax_refund_currency=tax_refund_currency,
+        tax_refund_country=tax_refund_country,
+        import_tax=import_tax,
+        import_tax_currency=import_tax_currency,
+        location=location,
+        location_details=location_details,
     )
     db.add(watch)
     db.commit()
@@ -188,6 +218,17 @@ def update_watch(
     has_papers: Optional[bool] = Form(None),
     notes: Optional[str] = Form(None),
     purchase_date: Optional[str] = Form(None),
+    # Tax refund
+    tax_refund: Optional[bool] = Form(None),
+    tax_refund_amount: Optional[float] = Form(None),
+    tax_refund_currency: Optional[str] = Form(None),
+    tax_refund_country: Optional[str] = Form(None),
+    # Import duty
+    import_tax: Optional[float] = Form(None),
+    import_tax_currency: Optional[str] = Form(None),
+    # Location
+    location: Optional[str] = Form(None),
+    location_details: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -221,6 +262,14 @@ def update_watch(
     if has_box is not None: watch.has_box = has_box
     if has_papers is not None: watch.has_papers = has_papers
     if notes is not None: watch.notes = notes
+    if tax_refund is not None: watch.tax_refund = tax_refund
+    if tax_refund_amount is not None: watch.tax_refund_amount = tax_refund_amount
+    if tax_refund_currency is not None: watch.tax_refund_currency = tax_refund_currency
+    if tax_refund_country is not None: watch.tax_refund_country = tax_refund_country
+    if import_tax is not None: watch.import_tax = import_tax
+    if import_tax_currency is not None: watch.import_tax_currency = import_tax_currency
+    if location is not None: watch.location = location
+    if location_details is not None: watch.location_details = location_details
     if purchase_date is not None:
         try:
             watch.purchase_date = datetime.fromisoformat(purchase_date)

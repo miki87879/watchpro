@@ -37,6 +37,10 @@ app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 models.Base.metadata.create_all(bind=engine)
 
+# Auto-migrate: add any new columns without touching existing data
+from database import migrate_watches_table
+migrate_watches_table()
+
 from routers import inventory, price_scout, ads, community, finance, watch_id, documents, settings, auth, logs, currency
 
 # ─── Create default admin on first launch ─────────────────────────────────────

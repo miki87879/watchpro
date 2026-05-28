@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
@@ -22,3 +22,23 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def migrate_watches_table():
+    """Add new columns to watches table without dropping data (SQLite ALTER TABLE)."""
+    new_columns = [
+        ("tax_refund",          "BOOLEAN DEFAULT 0"),
+        ("tax_refund_amount",   "FLOAT"),
+        ("tax_refund_currency", "VARCHAR(10)"),
+        ("tax_refund_country",  "VARCHAR(100)"),
+        ("import_tax",          "FLOAT DEFAULT 0"),
+        ("import_tax_currency", "VARCHAR(10) DEFAULT 'ILS'"),
+        ("location",            "VARCHAR(50) DEFAULT 'home_safe'"),
+        ("location_details",    "VARCHAR(200)"),
+    ]
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(watches)"))
+        existing = {row[1] for row in result}
+        for col_name, col_def in new_columns:
+            if col_name not in existing:
+                conn.execute(text(f"ALTER TABLE watches ADD COLUMN {col_name} {col_def}"))
+        conn.commit()

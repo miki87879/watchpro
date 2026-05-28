@@ -34,6 +34,17 @@ const initialForm = {
   has_papers: false,
   notes: '',
   purchase_date: '',
+  // Tax refund
+  tax_refund: false,
+  tax_refund_amount: '',
+  tax_refund_currency: 'USD',
+  tax_refund_country: '',
+  // Import duty
+  import_tax: '',
+  import_tax_currency: 'ILS',
+  // Location
+  location: 'home_safe',
+  location_details: '',
 }
 
 const conditions = [
@@ -139,6 +150,14 @@ export default function AddWatch() {
           has_papers: w.has_papers || false,
           notes: w.notes || '',
           purchase_date: w.purchase_date ? w.purchase_date.split('T')[0] : '',
+          tax_refund: w.tax_refund || false,
+          tax_refund_amount: w.tax_refund_amount?.toString() || '',
+          tax_refund_currency: w.tax_refund_currency || 'USD',
+          tax_refund_country: w.tax_refund_country || '',
+          import_tax: w.import_tax?.toString() || '',
+          import_tax_currency: w.import_tax_currency || 'ILS',
+          location: w.location || 'home_safe',
+          location_details: w.location_details || '',
         })
       })
       .catch(() => toast.error('שגיאה בטעינת השעון'))
@@ -516,6 +535,132 @@ export default function AddWatch() {
                   style={{ background: '#1f2937', border: '1px solid #374151' }}
                 />
               </div>
+            </div>
+
+            {/* ─── Tax Refund + Import Duty Card ─── */}
+            <div className="rounded-xl p-6" style={{ background: '#111827', border: '1px solid #1f2937' }}>
+              <h2 className="text-base font-semibold text-white mb-4">💰 מיסים ומכס</h2>
+
+              {/* Tax refund toggle */}
+              <label className="flex items-center gap-3 cursor-pointer mb-4">
+                <div
+                  onClick={() => set('tax_refund', !form.tax_refund)}
+                  className="w-10 h-5 rounded-full relative transition-colors cursor-pointer"
+                  style={{ background: form.tax_refund ? '#d4af37' : '#374151' }}
+                >
+                  <div
+                    className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all"
+                    style={{ left: form.tax_refund ? '1.4rem' : '0.125rem' }}
+                  />
+                </div>
+                <div>
+                  <span className="text-sm font-medium text-white">קיבלתי החזר מס (Tax Refund)</span>
+                  <p className="text-xs text-gray-500 mt-0.5">רכשתי בחו"ל וקיבלתי החזר מע"מ כתייר</p>
+                </div>
+              </label>
+
+              {form.tax_refund && (
+                <div className="grid grid-cols-3 gap-3 mb-4 p-4 rounded-xl" style={{ background: '#0d1520', border: '1px solid #d4af3730' }}>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">סכום ההחזר</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.tax_refund_amount}
+                      onChange={(e) => set('tax_refund_amount', e.target.value)}
+                      placeholder="0"
+                      className="w-full px-3 py-2 rounded-xl text-sm text-white placeholder-gray-600 outline-none"
+                      style={{ background: '#1f2937', border: '1px solid #374151' }}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">מטבע</label>
+                    <select
+                      value={form.tax_refund_currency}
+                      onChange={(e) => set('tax_refund_currency', e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none"
+                      style={{ background: '#1f2937', border: '1px solid #374151' }}
+                    >
+                      {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">מדינה</label>
+                    <input
+                      type="text"
+                      value={form.tax_refund_country}
+                      onChange={(e) => set('tax_refund_country', e.target.value)}
+                      placeholder="לדוג׳ שוויץ, צרפת..."
+                      className="w-full px-3 py-2 rounded-xl text-sm text-white placeholder-gray-600 outline-none"
+                      style={{ background: '#1f2937', border: '1px solid #374151' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Import duty */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">מכס ששולם בישראל</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.import_tax}
+                    onChange={(e) => set('import_tax', e.target.value)}
+                    placeholder="0"
+                    className="w-full px-3 py-2 rounded-xl text-sm text-white placeholder-gray-600 outline-none"
+                    style={{ background: '#1f2937', border: '1px solid #374151' }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">מטבע מכס</label>
+                  <select
+                    value={form.import_tax_currency}
+                    onChange={(e) => set('import_tax_currency', e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none"
+                    style={{ background: '#1f2937', border: '1px solid #374151' }}
+                  >
+                    {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* ─── Location Card ─── */}
+            <div className="rounded-xl p-6" style={{ background: '#111827', border: '1px solid #1f2937' }}>
+              <h2 className="text-base font-semibold text-white mb-4">📍 מיקום השעון</h2>
+              <div className="flex gap-3 mb-3">
+                {[
+                  { value: 'home_safe', label: '🔒 כספת ביתית' },
+                  { value: 'other', label: '📦 מקום אחר' },
+                ].map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => set('location', opt.value)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
+                    style={{
+                      background: form.location === opt.value ? '#d4af37' : '#1f2937',
+                      color: form.location === opt.value ? '#0a0e1a' : '#9ca3af',
+                      border: `1px solid ${form.location === opt.value ? '#d4af37' : '#374151'}`,
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              {form.location === 'other' && (
+                <input
+                  type="text"
+                  value={form.location_details}
+                  onChange={(e) => set('location_details', e.target.value)}
+                  placeholder="לדוג׳ כספת משרד, אחסון מקצועי, אצל שמאי..."
+                  className="w-full px-4 py-2.5 rounded-xl text-sm text-white placeholder-gray-600 outline-none"
+                  style={{ background: '#1f2937', border: '1px solid #374151' }}
+                />
+              )}
             </div>
 
             {/* Photos */}

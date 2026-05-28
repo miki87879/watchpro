@@ -54,6 +54,17 @@ class Watch(Base):
     purchase_date = Column(DateTime)
     sold_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Tax refund (purchased abroad — tourist VAT refund)
+    tax_refund = Column(Boolean, default=False)
+    tax_refund_amount = Column(Float)
+    tax_refund_currency = Column(String(10))
+    tax_refund_country = Column(String(100))
+    # Import customs/duty paid in Israel
+    import_tax = Column(Float, default=0)
+    import_tax_currency = Column(String(10), default="ILS")
+    # Physical location of the watch
+    location = Column(String(50), default="home_safe")   # "home_safe" | "other"
+    location_details = Column(String(200))
     photos = relationship("WatchPhoto", back_populates="watch", cascade="all, delete-orphan")
     documents = relationship("WatchDocument", back_populates="watch", cascade="all, delete-orphan")
 
