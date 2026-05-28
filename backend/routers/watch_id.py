@@ -120,6 +120,8 @@ SYSTEM_PROMPT = """You are WatchGPT — an elite luxury watch expert, appraiser,
 • Never confuse reference number (model ID) with serial number (unit ID).
 • Market values = actual secondary-market completed transactions, 2024-2025 data.
 • investment_grade: A+=Patek Nautilus/Daytona/AP Jumbo tier (5%+/yr appreciation); A=Rolex Sub/GMT/Omega Moonwatch; B=holds retail; C=−10-25%; D=−25%+.
+• PATEK FAMILY CRITICAL: 5711=Nautilus (steel integrated bracelet, octagonal porthole case). 5167/5168=Aquanaut (rubber strap, rounded octagonal). NEVER call 5711 an "Aquanaut".
+• ROLEX FAMILY CRITICAL: Day-Date=day+date+gold only (128xxx/228xxx). Datejust=date only (126xxx). Submariner=ceramic bezel 300m (126610LN black, 126610LV green). Daytona=chrono (126500LN). GMT-Master II=24h bezel (126710BLNR Batman).
 
 ━━━ CONFIDENCE (0.0–1.0) ━━━
 • Known reference number → 0.97–0.99. Image attached with reference = still 0.97+ (image is supplementary).
@@ -129,14 +131,13 @@ SYSTEM_PROMPT = """You are WatchGPT — an elite luxury watch expert, appraiser,
 ━━━ LANGUAGE ━━━
 ALL text fields in Hebrew (עברית). Brand/model names, reference numbers, calibers, and enums stay as-is.
 
-━━━ STRICT BREVITY — response budget is 1000 tokens total ━━━
-• Every text field: EXACTLY 1 short sentence (under 20 Hebrew words). No exceptions.
-• authentication_tips, red_flags: exactly 2 items each, no more.
-• similar_models: exactly 2 items, each note under 10 Hebrew words.
-• year_significance_note and known_variants_by_year: 1 sentence or null.
-• Do NOT pad with generic phrases. Be specific and ultra-concise.
+━━━ OUTPUT FORMAT (critical) ━━━
+Output MUST be a single-line compact JSON — no newlines, no indentation, no spaces after colons/commas.
+Every text field: EXACTLY 1 sentence (under 15 Hebrew words).
+authentication_tips: exactly 2 items. red_flags: exactly 2 items. similar_models: exactly 2 items.
+Do NOT add explanatory text before or after the JSON.
 
-Respond with ONLY valid JSON (no markdown). Schema — include ALL fields, even if null:
+Respond with ONLY valid compact JSON (no markdown, no newlines). Schema:
 {
   "brand": string,
   "model": string,
@@ -242,13 +243,14 @@ def build_user_message(query: Optional[str], serial: Optional[str],
 
 
 def _parse_claude_response(raw_text: str) -> dict:
-    """Parse Claude's response text into a dict. Handles markdown fences, leading text, etc."""
+    """Parse Claude's response text into a dict. Handles markdown, leading prose, truncation."""
     raw_text = raw_text.strip()
 
-    # 1. Strip markdown code fences (handles leading whitespace before ``` too)
-    raw_text = re.sub(r"^[\s\S]*?```(?:json)?\s*", "", raw_text, count=1) if "```" in raw_text else raw_text
-    raw_text = re.sub(r"\s*```[\s\S]*$", "", raw_text)
-    raw_text = raw_text.strip()
+    # 1. Strip markdown code fences
+    if "```" in raw_text:
+        raw_text = re.sub(r"^[\s\S]*?```(?:json)?\s*", "", raw_text, count=1)
+        raw_text = re.sub(r"\s*```[\s\S]*$", "", raw_text)
+        raw_text = raw_text.strip()
 
     # 2. Direct parse
     try:
@@ -256,7 +258,7 @@ def _parse_claude_response(raw_text: str) -> dict:
     except json.JSONDecodeError:
         pass
 
-    # 3. Extract first {...} block (handles leading prose before JSON)
+    # 3. Find the JSON object (greedy — from first { to last })
     m = re.search(r"\{[\s\S]*\}", raw_text)
     if m:
         try:
@@ -264,10 +266,25 @@ def _parse_claude_response(raw_text: str) -> dict:
         except Exception:
             pass
 
-    # 4. Give up
+    # 4. Truncated JSON recovery — append missing closing braces/brackets
+    start = raw_text.find("{")
+    if start != -1:
+        snippet = raw_text[start:]
+        # Close any open arrays/objects to make the JSON parseable
+        depth_obj = snippet.count("{") - snippet.count("}")
+        depth_arr = snippet.count("[") - snippet.count("]")
+        # Trim any trailing partial key/value (after last comma or complete value)
+        trimmed = re.sub(r',\s*"[^"]*$', "", snippet)   # remove trailing partial key
+        trimmed = re.sub(r',\s*$', "", trimmed)          # remove trailing comma
+        closing = "]" * max(0, depth_arr) + "}" * max(0, depth_obj)
+        try:
+            return json.loads(trimmed + closing)
+        except Exception:
+            pass
+
     raise HTTPException(
         status_code=422,
-        detail=f"Claude returned non-JSON response: {raw_text[:400]}",
+        detail=f"Claude returned non-JSON response: {raw_text[:600]}",
     )
 
 
@@ -282,7 +299,7 @@ async def call_claude(content: list, *, retries: int = 2) -> dict:
         client = anthropic.Anthropic(api_key=api_key, timeout=55.0)
         return client.messages.create(
             model="claude-haiku-4-5",
-            max_tokens=1200,          # schema fits in ~800-1000 tokens with brevity rules
+            max_tokens=1600,          # compact single-line JSON fits in ~900-1100 tokens
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content}],
         )
