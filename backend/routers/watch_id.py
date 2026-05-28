@@ -575,7 +575,38 @@ _eBay_H = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
-async def _ebay_sold(client: "_httpx.AsyncClient", query: str) -> list:
+# Known luxury watch brand keywords — used for relevance filtering
+_WATCH_BRANDS = {
+    "rolex", "patek", "philippe", "nautilus", "omega", "cartier",
+    "breitling", "iwc", "panerai", "hublot", "audemars", "piguet",
+    "vacheron", "constantin", "lange", "jaeger", "lecoultre", "grand seiko",
+    "tudor", "longines", "zenith", "tag heuer", "bulgari", "richard mille",
+    "blancpain", "chopard", "breguet", "glashutte", "nomos", "oris",
+    "frederique", "constant", "bell", "ross", "montblanc", "tissot",
+    "daytona", "submariner", "speedmaster", "aquanaut", "royal oak",
+}
+
+def _is_relevant(title: str, brand: str, model: str) -> bool:
+    """
+    Returns True if the listing title is relevant to the watch we're looking for.
+    Requires the title to contain at least one meaningful keyword from brand/model.
+    """
+    t = title.lower()
+    # Check brand words (e.g. "Patek", "Philippe", "Rolex")
+    for word in brand.lower().split():
+        if len(word) >= 4 and word in t:
+            return True
+    # Check model words (first 2 meaningful words, skip short ones)
+    for word in model.lower().split()[:3]:
+        if len(word) >= 4 and word in t:
+            return True
+    # Check generic watch brand keywords
+    for kw in _WATCH_BRANDS:
+        if kw in t:
+            return True
+    return False
+
+async def _ebay_sold(client: "_httpx.AsyncClient", query: str, brand: str = "", model: str = "") -> list:
     """Scrape eBay *completed + sold* listings (actual transaction prices)."""
     results = []
     try:
@@ -592,7 +623,7 @@ async def _ebay_sold(client: "_httpx.AsyncClient", query: str) -> list:
         if r.status_code != 200:
             return results
         soup = _BS(r.text, "lxml")
-        for item in soup.select(".s-item:not(.s-item--placeholder)")[:30]:
+        for item in soup.select(".s-item:not(.s-item--placeholder)")[:40]:
             t_el = item.select_one(".s-item__title")
             p_el = item.select_one(".s-item__price")
             a_el = item.select_one("a.s-item__link")
@@ -604,13 +635,17 @@ async def _ebay_sold(client: "_httpx.AsyncClient", query: str) -> list:
             if "Shop on eBay" in title or not title:
                 continue
 
+            # Relevance check — must mention brand or known watch keyword
+            if brand and not _is_relevant(title, brand, model):
+                continue
+
             price_txt = p_el.get_text(strip=True)
             # Handle price ranges like "$8,000 to $9,000" — take lower bound
             if " to " in price_txt:
                 price_txt = price_txt.split(" to ")[0]
 
             amount, cur = _parse_price_str(price_txt)
-            if not amount or amount < 200:
+            if not amount or amount < 500:
                 continue
 
             link = a_el.get("href", "") if a_el else ""
@@ -632,7 +667,7 @@ async def _ebay_sold(client: "_httpx.AsyncClient", query: str) -> list:
     return results
 
 
-async def _ebay_active_api(client: "_httpx.AsyncClient", query: str) -> list:
+async def _ebay_active_api(client: "_httpx.AsyncClient", query: str, brand: str = "", model: str = "") -> list:
     """eBay Browse API — active listings. Requires API key."""
     from routers.price_scout import _get_ebay_token
     results = []
@@ -658,6 +693,8 @@ async def _ebay_active_api(client: "_httpx.AsyncClient", query: str) -> list:
         if r.status_code == 200:
             for item in r.json().get("itemSummaries", []):
                 title = item.get("title", "").strip()
+                if brand and not _is_relevant(title, brand, model):
+                    continue
                 price_info = item.get("price", {})
                 try:
                     amount = float(price_info.get("value", 0))
@@ -665,7 +702,7 @@ async def _ebay_active_api(client: "_httpx.AsyncClient", query: str) -> list:
                     continue
                 cur = price_info.get("currency", "USD")
                 url = item.get("itemWebUrl", "")
-                if amount < 200:
+                if amount < 500:
                     continue
                 results.append({
                     "title": title,
@@ -683,11 +720,10 @@ async def _ebay_active_api(client: "_httpx.AsyncClient", query: str) -> list:
     return results
 
 
-async def _chrono24_listings(client: "_httpx.AsyncClient", query: str) -> list:
+async def _chrono24_listings(client: "_httpx.AsyncClient", query: str, brand: str = "", model: str = "") -> list:
     """Chrono24 public search — try JSON output."""
     results = []
     try:
-        # Try their internal search API
         r = await client.get(
             "https://www.chrono24.com/search/index.htm",
             params={
@@ -717,8 +753,10 @@ async def _chrono24_listings(client: "_httpx.AsyncClient", query: str) -> list:
                 )
                 if not title:
                     continue
+                if brand and not _is_relevant(title, brand, model):
+                    continue
                 amount, cur = _parse_price_str(str(price_raw))
-                if not amount or amount < 200:
+                if not amount or amount < 500:
                     continue
                 link = item.get("detailPageUrl") or item.get("url") or ""
                 if link and not link.startswith("http"):
@@ -739,8 +777,8 @@ async def _chrono24_listings(client: "_httpx.AsyncClient", query: str) -> list:
     return results
 
 
-async def _marktplaats_listings(client: "_httpx.AsyncClient", query: str) -> list:
-    """Marktplaats (NL) — European market prices."""
+async def _marktplaats_listings(client: "_httpx.AsyncClient", query: str, brand: str = "", model: str = "") -> list:
+    """Marktplaats (NL) — European market prices. query should be brand+model, NOT reference alone."""
     results = []
     try:
         r = await client.get(
@@ -765,11 +803,14 @@ async def _marktplaats_listings(client: "_httpx.AsyncClient", query: str) -> lis
                 title = listing.get("title", "").strip()
                 if not title:
                     continue
+                # Relevance check — title must mention brand or model
+                if not _is_relevant(title, brand, model):
+                    continue
                 pc = listing.get("priceInfo", {}).get("priceCents", 0)
                 if not pc:
                     continue
                 amount = pc / 100.0
-                if amount < 200:
+                if amount < 800:
                     continue
                 vip = listing.get("vipUrl", "")
                 if vip and not vip.startswith("http"):
@@ -790,7 +831,7 @@ async def _marktplaats_listings(client: "_httpx.AsyncClient", query: str) -> lis
     return results
 
 
-async def _reddit_prices(client: "_httpx.AsyncClient", query: str) -> list:
+async def _reddit_prices(client: "_httpx.AsyncClient", query: str, brand: str = "", model: str = "") -> list:
     """Reddit WatchExchange — community seller prices."""
     results = []
     try:
@@ -812,6 +853,8 @@ async def _reddit_prices(client: "_httpx.AsyncClient", query: str) -> list:
                 # Only [WTS] posts have prices
                 if not any(m in title.upper() for m in ["[WTS]", "WTS ", "[FS]", "FOR SALE"]):
                     continue
+                if brand and not _is_relevant(title, brand, model):
+                    continue
                 m = re.search(r"\$([\d,]+)", title)
                 if not m:
                     continue
@@ -819,7 +862,7 @@ async def _reddit_prices(client: "_httpx.AsyncClient", query: str) -> list:
                     amount = float(m.group(1).replace(",", ""))
                 except Exception:
                     continue
-                if amount < 200:
+                if amount < 500:
                     continue
                 url = "https://reddit.com" + p.get("permalink", "")
                 results.append({
@@ -874,14 +917,16 @@ async def get_market_prices(brand: str, model: str, reference: str = ""):
     if cached and _time.time() - cached["ts"] < _MKT_TTL:
         return cached["data"]
 
-    # Build queries — most specific first
     ref = reference.strip()
-    queries = []
-    if ref:
-        queries.append(ref)
-        queries.append(f"{brand} {ref}")
-    queries.append(f"{brand} {model}")
-    primary = queries[0]
+    brand = brand.strip()
+    model = model.strip()
+
+    # Query strategy per source:
+    # - eBay (watch category 31387): brand + model + reference  → most specific
+    # - Chrono24 (watch-only site): brand + model (+ ref if short)
+    # - Marktplaats / Reddit: brand + model ONLY (ref number causes false matches)
+    ebay_query      = f"{brand} {model} {ref}".strip() if ref else f"{brand} {model}"
+    broad_query     = f"{brand} {model}".strip()       # for general marketplaces
 
     limits = _httpx.Limits(max_keepalive_connections=10, max_connections=15)
     async with _httpx.AsyncClient(
@@ -890,11 +935,11 @@ async def get_market_prices(brand: str, model: str, reference: str = ""):
         timeout=_httpx.Timeout(18.0),
     ) as client:
         tasks = [
-            _ebay_sold(client, primary),
-            _ebay_active_api(client, primary),
-            _chrono24_listings(client, primary),
-            _marktplaats_listings(client, primary),
-            _reddit_prices(client, primary),
+            _ebay_sold(client, ebay_query, brand, model),
+            _ebay_active_api(client, ebay_query, brand, model),
+            _chrono24_listings(client, broad_query, brand, model),
+            _marktplaats_listings(client, broad_query, brand, model),
+            _reddit_prices(client, broad_query, brand, model),
         ]
         raw = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -906,18 +951,6 @@ async def get_market_prices(brand: str, model: str, reference: str = ""):
             src = result[0].get("source", "")
             if src not in sources_hit:
                 sources_hit.append(src)
-
-    # If primary query returned nothing with just reference, try brand+model
-    if not all_listings and ref:
-        async with _httpx.AsyncClient(follow_redirects=True, timeout=_httpx.Timeout(18.0)) as client:
-            tasks2 = [
-                _ebay_sold(client, f"{brand} {model}"),
-                _chrono24_listings(client, f"{brand} {model}"),
-            ]
-            raw2 = await asyncio.gather(*tasks2, return_exceptions=True)
-            for result in raw2:
-                if isinstance(result, list):
-                    all_listings.extend(result)
 
     # Sort: sold listings first (most credible), then by price
     sold_listings = [l for l in all_listings if l.get("type") == "sold"]
@@ -934,7 +967,7 @@ async def get_market_prices(brand: str, model: str, reference: str = ""):
     stats = _compute_stats(sold_prices if len(sold_prices) >= 3 else all_prices)
 
     result_data = {
-        "query": primary,
+        "query": ebay_query,
         "stats": stats,
         "listings": combined[:20],       # cap at 20 for the UI
         "sold_count": len(sold_listings),
