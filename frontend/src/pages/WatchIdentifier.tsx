@@ -100,11 +100,18 @@ export default function WatchIdentifier() {
   const [dots, setDots] = useState('.')
 
   const INPUT_MODES = [
-    { key: 'reference' as const, label: '# רפרנס', placeholder: 'לדוגמה: 126610LN / 5711/1A / 15500ST / 127235' },
+    { key: 'reference' as const, label: '# רפרנס', placeholder: 'לדוגמה: 126610LN / 5711/1A / 15500ST / 126235' },
     { key: 'serial'    as const, label: '🔢 סידורי', placeholder: 'לדוגמה: T123456 / G234567 / 2T654321 (Rolex)' },
-    { key: 'name'      as const, label: '📝 שם חופשי', placeholder: 'לדוגמה: Rolex Submariner, Patek Nautilus' },
+    { key: 'name'      as const, label: '📝 שם חופשי', placeholder: 'לדוגמה: Rolex Datejust 36, Patek Nautilus' },
   ]
   const currentMode = INPUT_MODES.find(m => m.key === queryType)!
+
+  // Detect if input looks like a reference number even when serial tab is selected
+  const looksLikeReference = queryType === 'serial' && query.trim().length >= 5 && (
+    /^\d{5,6}[A-Z]{0,4}$/i.test(query.trim()) ||   // Rolex: 126610LN, 126235, 127235
+    /^\d{4}\/\d{1,2}[A-Z]?$/i.test(query.trim()) || // Patek: 5711/1A
+    /^\d{5}[A-Z]{2}/i.test(query.trim())             // AP: 15500ST
+  )
 
   // Animated dots for loading
   const startDots = () => {
@@ -254,12 +261,35 @@ export default function WatchIdentifier() {
             className="w-full rounded-xl px-4 py-3 text-white placeholder-gray-500 outline-none transition-all"
             style={{
               background: '#0d1117',
-              border: `1px solid ${BORDER}`,
+              border: `1px solid ${looksLikeReference ? '#f59e0b' : BORDER}`,
               fontSize: '15px',
             }}
-            onFocus={(e) => (e.target.style.borderColor = GOLD)}
-            onBlur={(e) => (e.target.style.borderColor = BORDER)}
+            onFocus={(e) => (e.target.style.borderColor = looksLikeReference ? '#f59e0b' : GOLD)}
+            onBlur={(e) => (e.target.style.borderColor = looksLikeReference ? '#f59e0b' : BORDER)}
           />
+
+          {/* Auto-detect: warn if input looks like a reference number while in serial mode */}
+          {looksLikeReference && (
+            <div
+              className="mt-2 rounded-xl px-4 py-3 flex items-center justify-between gap-3"
+              style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.4)' }}
+            >
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <span style={{ fontSize: 16, flexShrink: 0 }}>⚠️</span>
+                <p className="text-xs" style={{ color: '#fbbf24' }}>
+                  <strong>{query.trim()}</strong> נראה כמו <strong>מספר רפרנס</strong> — לא מספר סידורי.
+                  מספרי סידורי של Rolex מתחילים באות (T, G, M…) או בשני תווים.
+                </p>
+              </div>
+              <button
+                onClick={() => setQueryType('reference')}
+                className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                style={{ background: '#f59e0b', color: '#000' }}
+              >
+                עבור לרפרנס ←
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Quick suggestions — only for reference mode */}
