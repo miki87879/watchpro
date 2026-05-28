@@ -582,10 +582,11 @@ def export_excel(db: Session = Depends(get_db)):
 #  Hebrew RTL via python-bidi + Arial Unicode font
 # ══════════════════════════════════════════════════════════════════════════════
 
-ARIAL_UNICODE = "/Library/Fonts/Arial Unicode.ttf"
-ARIAL_UNICODE_BOLD = "/Library/Fonts/Arial Bold.ttf"  # bold fallback (latin-only)
-# Brush Script for digital signature — elegant cursive that ships with macOS
-BRUSH_SCRIPT = "/System/Library/Fonts/Supplemental/Brush Script.ttf"
+# Bundled fonts — DejaVu Sans has full Hebrew/Unicode coverage and ships with the repo
+_FONTS_DIR = os.path.join(os.path.dirname(__file__), "..", "fonts")
+ARIAL_UNICODE      = os.path.join(_FONTS_DIR, "DejaVuSans.ttf")
+ARIAL_UNICODE_BOLD = os.path.join(_FONTS_DIR, "DejaVuSans-Bold.ttf")
+BRUSH_SCRIPT       = ARIAL_UNICODE  # no cursive in Docker; fall back to regular
 VAT_RATE = 17.0  # מע"מ ישראל
 SYSTEM_DOCS_DIR = os.path.join(BASE_DIR, "uploads", "system_documents")
 os.makedirs(SYSTEM_DOCS_DIR, exist_ok=True)
@@ -673,9 +674,9 @@ def _build_israeli_pdf(data: IsraeliDocRequest) -> bytes:
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=20)
 
-    # Register Unicode font for Hebrew
-    pdf.add_font("Heb",   fname=ARIAL_UNICODE,      uni=True)
-    pdf.add_font("HebB",  fname=ARIAL_UNICODE,      uni=True)   # same (bold via weight)
+    # Register Unicode font for Hebrew (DejaVu has full Hebrew coverage)
+    pdf.add_font("Heb",  fname=ARIAL_UNICODE)
+    pdf.add_font("HebB", fname=ARIAL_UNICODE_BOLD)
 
     def cell_r(w, h, txt, fill=False, border=0, new_x=XPos.RIGHT, new_y=YPos.TOP, align="R"):
         """Right-aligned cell with Hebrew bidi transform."""
@@ -918,7 +919,7 @@ def _build_israeli_pdf(data: IsraeliDocRequest) -> bytes:
     brush_ok = os.path.exists(BRUSH_SCRIPT)
     if brush_ok:
         try:
-            pdf.add_font("Sig", style="", fname=BRUSH_SCRIPT, uni=True)
+            pdf.add_font("Sig", style="", fname=BRUSH_SCRIPT)
             brush_ok = True
         except Exception:
             brush_ok = False
