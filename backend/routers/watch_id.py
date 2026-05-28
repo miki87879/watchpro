@@ -377,28 +377,36 @@ async def call_claude(content: list, *, retries: int = 2) -> dict:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
 
     def _sync_call():
-        client = anthropic.Anthropic(api_key=api_key)
+        # Explicit 45-second timeout so we fail before Railway's gateway timeout (60s)
+        client = anthropic.Anthropic(api_key=api_key, timeout=45.0)
         return client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=4096,
+            max_tokens=2000,          # was 4096 — full response fits in ~1200 tokens
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content}],
         )
 
-    last_exc: Exception | None = None
+    last_exc = None
     for attempt in range(retries + 1):
         try:
-            response = await asyncio.to_thread(_sync_call)
+            # asyncio.wait_for gives us a Python-level deadline as safety net
+            response = await asyncio.wait_for(
+                asyncio.to_thread(_sync_call),
+                timeout=48.0,
+            )
             if not response.content:
                 raise ValueError("Empty response from Claude")
             return _parse_claude_response(response.content[0].text)
         except HTTPException:
             raise  # validation errors → no retry
+        except asyncio.TimeoutError:
+            last_exc = Exception("timeout")
+            print(f"[call_claude] attempt {attempt + 1} timed out")
         except Exception as exc:
             last_exc = exc
             print(f"[call_claude] attempt {attempt + 1} failed: {exc}")
-            if attempt < retries:
-                await asyncio.sleep(1.5 ** attempt)  # 1s, 1.5s backoff
+        if attempt < retries:
+            await asyncio.sleep(1.5 ** attempt)
 
     raise HTTPException(
         status_code=503,
