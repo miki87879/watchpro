@@ -367,8 +367,28 @@ async def identify_watch(body: IdentifyRequest):
     return result
 
 
-# ─── Quick-fill endpoint (Haiku — fast & cheap) ──────────────────────────────
-QUICK_FILL_SYSTEM = """You are a luxury watch database. Given a reference number or model name, return a compact JSON with just the fields needed to pre-fill an inventory form. Be fast and precise.
+# ─── Quick-fill endpoint ─────────────────────────────────────────────────────
+QUICK_FILL_SYSTEM = """You are a luxury watch reference database. Given a reference number, return a compact JSON to pre-fill an inventory form. Accuracy is CRITICAL — never guess or hallucinate model names.
+
+━━━ PATEK PHILIPPE FAMILY DISTINCTIONS (never confuse) ━━━
+• NAUTILUS: refs 5711, 5712, 5726, 5980, 5990, 5726A — integrated steel bracelet, octagonal porthole bezel
+• AQUANAUT: refs 5167, 5168, 5164, 5969 — rubber strap, rounded octagonal case, sporty look
+• CALATRAVA: refs 5196, 5227, 6000 — round dress watch, no complications
+• COMPLICATIONS: refs 5270, 5204, 5396, 5905 — various complications
+5711/1A = Nautilus (NOT Aquanaut). 5167A = Aquanaut. Never swap these.
+
+━━━ ROLEX FAMILY DISTINCTIONS (never confuse) ━━━
+• DATEJUST 36: 126xxx refs — date only at 3, no day display
+• DAY-DATE: 128xxx refs — day + date, precious metals only
+• SUBMARINER: 126610LN (black), 126610LV (green), 124060 (no-date)
+• DAYTONA: 126500LN, 126515LN, 116500LN
+• GMT-MASTER II: 126710BLNR (Batman), 126710BLRO (Pepsi), 126711CHNR
+
+━━━ GENERAL ACCURACY RULES ━━━
+• A reference number UNIQUELY identifies one model. Look it up precisely.
+• If uncertain about model name, return what you know for certain and leave unsure fields null.
+• NEVER fabricate or approximate a model name — return the exact official name.
+• market_value_excellent = secondary market value in USD for excellent condition (2024-2025 data)
 
 Respond ONLY with valid JSON (no markdown):
 {
@@ -376,13 +396,13 @@ Respond ONLY with valid JSON (no markdown):
   "model": string,
   "reference": string,
   "year_introduced": int|null,
-  "case_material": string,
-  "movement": string,
+  "case_material": string|null,
+  "movement": string|null,
   "water_resistance_m": number|null,
   "retail_price_usd": number|null,
   "market_value_excellent": number|null,
-  "dial_description": string,
-  "brief_notes": string
+  "dial_description": string|null,
+  "brief_notes": string|null
 }
 All text fields in Hebrew except brand/model/reference names."""
 
@@ -412,8 +432,8 @@ async def quick_fill(body: IdentifyRequest):
     def _sync():
         client = anthropic.Anthropic(api_key=api_key)
         return client.messages.create(
-            model="claude-haiku-4-5",   # ← Haiku: ~5s, ~50x cheaper than Sonnet
-            max_tokens=600,
+            model="claude-sonnet-4-6",   # ← Sonnet: accurate model identification
+            max_tokens=800,
             system=QUICK_FILL_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
