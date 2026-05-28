@@ -132,11 +132,12 @@ year_significance_note: Hebrew, 2-3 sentences — which production years/sub-var
 known_variants_by_year: Hebrew — key year-specific variants (dial, caliber, bezel). Null if single-variant modern watch.
 
 ━━━ LANGUAGE ━━━
-ALL text fields in Hebrew (עברית). Brand/model names, reference numbers, caliber designations, and enum values (rising/stable/falling, A+/A/B/C/D) stay in their original form.
-- Every other string field MUST be in Hebrew: case_material, dial_description, investment_reasoning,
-  authentication_tips, red_flags, collector_notes, availability, historical_significance,
-  box_papers_premium, best_time_to_buy, price_trend_note, similar_models[].note, movement, crystal,
-  bracelet, clasp, dial_color, bezel, year_significance_note, known_variants_by_year.
+ALL text fields in Hebrew (עברית). Brand/model names, reference numbers, calibers, and enums (rising/stable/falling, A+/A/B/C/D) stay as-is.
+
+━━━ BREVITY (critical for speed) ━━━
+• Text fields: maximum 2 sentences each.
+• Arrays (authentication_tips, red_flags, similar_models): maximum 3 items each.
+• Do NOT pad with generic phrases — be specific and concise.
 
 Respond with ONLY valid JSON, no prose, no markdown fences. Schema:
 {
@@ -287,11 +288,12 @@ async def call_claude(content: list, *, retries: int = 2) -> dict:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
 
     def _sync_call():
-        # Explicit 45-second timeout so we fail before Railway's gateway timeout (60s)
+        # Use Haiku (5-7× faster than Sonnet). Sonnet was taking 60-100s → timeout.
+        # If haiku-4-5 doesn't exist we fall back below.
         client = anthropic.Anthropic(api_key=api_key, timeout=45.0)
         return client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2000,          # was 4096 — full response fits in ~1200 tokens
+            model="claude-haiku-4-5",
+            max_tokens=1800,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content}],
         )
