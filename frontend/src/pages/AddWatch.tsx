@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import {
   Upload,
@@ -110,6 +110,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 export default function AddWatch() {
   const navigate = useNavigate()
   const { id } = useParams()
+  const location = useLocation()
   const isEdit = Boolean(id)
   const { meta: currencyMeta } = useCurrency()
 
@@ -168,6 +169,27 @@ export default function AddWatch() {
       .catch(() => toast.error('שגיאה בטעינת השעון'))
       .finally(() => setFetchingWatch(false))
   }, [id, isEdit])
+
+  // Pre-fill from Watch Identifier ("הוסף למלאי" button)
+  useEffect(() => {
+    if (isEdit) return
+    const prefill = (location.state as { prefill?: Record<string, string> } | null)?.prefill
+    if (!prefill) return
+    setForm(prev => ({
+      ...prev,
+      brand:         prefill.brand         || prev.brand,
+      model:         prefill.model         || prev.model,
+      reference:     prefill.reference     || prev.reference,
+      year:          prefill.year          || prev.year,
+      notes:         prefill.notes         || prev.notes,
+      asking_price:  prefill.asking_price  || prev.asking_price,
+      price_currency: prefill.price_currency || prev.price_currency,
+    }))
+    if (prefill.brand || prefill.model) {
+      toast.success(`📋 פרטי ${prefill.brand} ${prefill.model} מולאו אוטומטית`, { duration: 3000 })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // intentionally runs once on mount
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFiles((prev) => [...prev, ...acceptedFiles])

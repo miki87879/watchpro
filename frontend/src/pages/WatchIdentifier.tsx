@@ -767,17 +767,37 @@ export default function WatchIdentifier() {
           {/* Section 4: Action buttons */}
           <div className="flex flex-wrap gap-3 pt-2">
             <button
-              onClick={() =>
+              onClick={() => {
+                // Build rich notes from all available specs
+                const noteLines: string[] = []
+                if (result.dial_description) noteLines.push(`לוח: ${result.dial_description}`)
+                if (result.bezel) noteLines.push(`לוח הרים: ${result.bezel}`)
+                if (result.bracelet) noteLines.push(`צמיד: ${result.bracelet}`)
+                if (result.case_material) noteLines.push(`קייס: ${result.case_material}`)
+                if (result.movement) noteLines.push(`מנגנון: ${result.movement}`)
+                if (result.crystal) noteLines.push(`קריסטל: ${result.crystal}`)
+                if (result.power_reserve_hours) noteLines.push(`עתודת כוח: ${result.power_reserve_hours} שעות`)
+                if (result.water_resistance_m) noteLines.push(`עמידות למים: ${result.water_resistance_m} מ'`)
+                if (result.collector_notes) noteLines.push(`\nהערות: ${result.collector_notes}`)
+
                 navigate('/inventory/add', {
                   state: {
                     prefill: {
                       brand: result.brand,
                       model: result.model,
                       reference: result.reference,
+                      year: result.year_introduced?.toString() || '',
+                      notes: noteLines.join('\n'),
+                      asking_price: (
+                        result.market_values.excellent_no_papers ??
+                        result.market_values.excellent_with_papers ??
+                        ''
+                      ).toString(),
+                      price_currency: 'USD',
                     },
                   },
                 })
-              }
+              }}
               className="flex-1 py-3 rounded-xl font-semibold transition-all hover:opacity-80 flex items-center justify-center gap-2"
               style={{
                 background: 'linear-gradient(135deg, #d4af37, #b8962e)',

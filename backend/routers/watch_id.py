@@ -153,9 +153,20 @@ When you receive a reference number, these rules are absolute:
 • If the reference is ambiguous or unknown to you, lower confidence to 0.55–0.75 and explain clearly
   in collector_notes. NEVER override your uncertainty with fabricated certainty.
 
+━━━ CONFIDENCE CALIBRATION (critical) ━━━
+confidence reflects identification certainty (0.0–1.0):
+• Reference number provided AND it is a known model in your training data → confidence MUST be 0.97–0.99.
+  Do NOT lower confidence because an image is also attached. The reference number is the ground truth;
+  the image is supplementary for physical-condition details only.
+• Reference number provided but NOT in your training data → 0.55–0.75, explain in collector_notes.
+• Name/free-text search only → 0.80–0.95 depending on uniqueness of the model name.
+• Image only → 0.65–0.90 depending on image quality and model distinctiveness.
+• Serial number only → 0.40–0.70 (serial alone cannot identify the model).
+NEVER average down a reference-based confidence because of low image quality or image ambiguity.
+
 ━━━ GENERAL ACCURACY RULES ━━━
 1. Reference numbers, caliber numbers, dimensions, and retail prices must be factually exact — never approximate or fabricated.
-2. Market values must reflect actual completed transactions (WatchCharts, Chrono24, Bob's, WatchBox data), not estimates.
+2. Market values must reflect actual completed transactions (WatchCharts, Chrono24, Bob's, WatchBox data), not estimates. Use 2024-2025 data.
 3. If you are less than 90% certain of a technical spec, omit that field (return null) rather than guess.
 4. investment_grade must follow this rubric:
    A+ = Consistent 5%+ annual appreciation + high liquidity (Patek 5711, Rolex Daytona, AP 15202)
@@ -163,7 +174,6 @@ When you receive a reference number, these rules are absolute:
    B  = Holds retail value ±10% over 3 years
    C  = Depreciates 10-25% from retail
    D  = Depreciates >25% or illiquid
-5. confidence must reflect identification certainty (0.0–1.0). With unambiguous reference number: 0.97–0.99. With image only: 0.70–0.90. With serial number only: 0.40–0.70.
 
 CRITICAL LANGUAGE RULE: All text fields in the JSON must be written in fluent, natural Hebrew (עברית).
 - Brand names, model names, reference numbers, caliber names stay as-is (Rolex, Submariner, 126610LN, Calibre 3235).
@@ -234,8 +244,11 @@ def build_user_message(query: Optional[str], serial: Optional[str],
         if is_ref:
             text_lines.append(
                 f"⚑ מספר רפרנס מדויק: {query}\n"
-                f"  → זהו מספר רפרנס — מזהה ייחודי של דגם ספציפי. "
-                f"הצבע את השעון המדויק לפי רפרנס זה. אל תתחלף עם רפרנסים דומים."
+                f"  → זהו מספר רפרנס — מזהה ייחודי לחלוטין של דגם + חומר ספציפיים.\n"
+                f"  → זהה את השעון על פי הרפרנס בלבד מתוך הידע שלך.\n"
+                f"  → אם הרפרנס ידוע לך: קבע confidence = 0.97–0.99. "
+                f"תמונה מצורפת = עזר לתיאור מצב בלבד, לא תורידי confidence.\n"
+                f"  → אל תתחלף עם רפרנסים דומים (127235 ≠ 126235 ≠ 128235)."
             )
         elif query_type == "serial":
             text_lines.append(
