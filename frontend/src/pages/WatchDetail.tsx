@@ -337,6 +337,11 @@ export default function WatchDetail() {
                 <div className="text-lg font-bold text-white">
                   {fmtPrice(watch.purchase_price, watch.price_currency)}
                 </div>
+                {watch.purchase_price_ils != null && (watch.tax_refund || (watch.import_tax ?? 0) > 0) && (
+                  <div className="text-xs mt-0.5" style={{ color: '#d4af37' }}>
+                    נטו: ₪{Math.round(watch.purchase_price_ils).toLocaleString('he-IL')}
+                  </div>
+                )}
               </div>
               <div>
                 <div className="text-xs text-gray-500 mb-0.5">{watch.status === 'sold' ? 'מחיר מכירה' : 'מחיר מבוקש'}</div>
