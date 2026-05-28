@@ -8,6 +8,7 @@ sqlalchemy==2.0.36
 # Auth (JWT + password hashing) — required at module level
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
 
 # Request handling
 python-multipart==0.0.12
