@@ -175,13 +175,58 @@ NEVER average down a reference-based confidence because of low image quality or 
    C  = Depreciates 10-25% from retail
    D  = Depreciates >25% or illiquid
 
+━━━ VINTAGE & YEAR-SPECIFIC ACCURACY PROTOCOL (critical for high-value assessments) ━━━
+For many luxury watches the production year is AS IMPORTANT as the reference number.
+You must document year-specific variations with expert-level precision.
+
+ROLEX VINTAGE (pre-2000) — key year-sensitive variations:
+• Dial generations: gilt/gold-text dials (1950s–mid 1960s) → matte dials (mid 1960s–1983) → glossy dials (1984+)
+  "Tropical" dials (brown/chocolate patina on formerly black dials): command 2–10× premiums regardless of reference.
+• Crown / winding-crown evolution: wide crown (pre-1953) → small crown (1953–1959) → crown guards (1959+)
+• Submariner 5512/5513: early non-meters-first dials (pre-1967) → meters-first → "SWISS" only feet variants
+• Submariner 1680: "Red Sub" (red SUBMARINER text 1969–1979) vs standard text — significant premium
+• Daytona 6239/6241/6262/6263/6264/6265 "Paul Newman": exotic dial = exceptional ($300k–$1M+)
+• Explorer 1016: matte (1963–1988) vs glossy (1988–1991) — generation premium
+• GMT-Master 1675: earlier "Pepsi" (red/blue) vs later "Coke" (red/black); Mk I/II/III/IV dial variations
+• Movement caliber milestones: Sub 1030→1560/1570→3000→3135→3235; Daytona Valjoux 72→Cal 4030→Cal 4130
+• Rolex "Exclamation Mark" dials (pre-Swiss Made marking): highest vintage premium
+
+PATEK PHILIPPE year-critical references:
+• Nautilus 3700 (1976–1990, original): A-series dial first generation highest premium; later gens lower
+• 5711/1A: white vs blue dial eras; final production (2021) commands strong premium
+• Calatrava 96/570/3796: hand-finishing and dial variations by decade
+
+AUDEMARS PIGUET ROYAL OAK:
+• 5402 "Jumbo" (1972–2012): A-series (1972-1976) = maximum premium; caliber 2121 throughout
+• 15202 "Jumbo" ultra-thin (current): still caliber 2121
+• 15400/15500: larger case, caliber 3120/4302 — different tier
+
+OMEGA SPEEDMASTER — the most year-critical luxury watch:
+• Caliber 321 era (CK2998/2915/105.002/105.003/105.012, 1957–1968): MAXIMUM premium — $30k–$80k+
+• "Ed White" 105.003 (1965 first US spacewalk): special significance
+• Pre-moon certification models (105.012-66, 145.012-67): next tier
+• Caliber 861 (1969–1996): standard moonwatch, significantly lower vs 321
+• Caliber 1861 (1996–2020): modern; caliber 3861 (2020+): Co-Axial Master Chronometer
+• ST105.003/ST145.022: specific reference numbering reveals exact era
+
+IWC MARK SERIES: Mark XI (military), Mark XII, Mark XV, Mark XVI, Mark XVII — each era distinct value
+
+JAEGER-LECOULTRE REVERSO:
+• Grande Taille / Classique / Squadra: exact year determines case dimensions and movement generation
+• Original 1931 era pieces: museum quality
+
+MANDATORY new fields in your response:
+- production_year_range: The actual production span of this reference, e.g. "1959–1984" or "2020–present"
+- year_significance_note: Hebrew text (2–4 sentences). For vintage/year-sensitive watches: explain WHICH years/sub-variants are most valuable and WHY (dial type, serial range, caliber version). For modern watches with stable production: state that year has minimal impact on value.
+- known_variants_by_year: Hebrew text listing the most important year-specific sub-variants for this reference (e.g., "לוח gilt עד 1967 — פרמיה של 50-100%; לוח matte 1967-1983 — ערך שוק סטנדרטי; לוח glossy 1984+ — פרמיה נמוכה יותר"). Null if not applicable (e.g., modern reference with single variant).
+
 CRITICAL LANGUAGE RULE: All text fields in the JSON must be written in fluent, natural Hebrew (עברית).
 - Brand names, model names, reference numbers, caliber names stay as-is (Rolex, Submariner, 126610LN, Calibre 3235).
 - Enum values stay as-is: price_trend ("rising"/"stable"/"falling"), investment_grade (A+/A/B/C/D).
 - Every other string field MUST be in Hebrew: case_material, dial_description, investment_reasoning,
   authentication_tips, red_flags, collector_notes, availability, historical_significance,
   box_papers_premium, best_time_to_buy, price_trend_note, similar_models[].note, movement, crystal,
-  bracelet, clasp, dial_color, bezel.
+  bracelet, clasp, dial_color, bezel, year_significance_note, known_variants_by_year.
 
 Respond with ONLY valid JSON, no prose, no markdown fences. Schema:
 {
@@ -226,7 +271,10 @@ Respond with ONLY valid JSON, no prose, no markdown fences. Schema:
   "availability": string(Hebrew),
   "historical_significance": string(Hebrew),
   "box_papers_premium": string(Hebrew),
-  "reference_image_url": string|null
+  "reference_image_url": string|null,
+  "production_year_range": string|null,
+  "year_significance_note": string(Hebrew)|null,
+  "known_variants_by_year": string(Hebrew)|null
 }
 IMPORTANT — reference_image_url: Provide a direct publicly-accessible image URL of this exact watch reference (e.g. from Wikimedia Commons, manufacturer press kit, or Hodinkee). Must be a real, working .jpg/.png URL. Set null if uncertain."""
 

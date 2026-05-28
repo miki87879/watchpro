@@ -142,6 +142,20 @@ function generateReport(result: WatchResult, imagePreview: string | null): void 
     </div>
   </div>
 
+  ${(result.production_year_range || result.year_significance_note || result.known_variants_by_year) ? `
+  <h2>שנה ווריאנטים</h2>
+  ${result.production_year_range ? `<p style="color:#d4af37;font-size:0.95rem;margin-bottom:10px;">תקופת ייצור: <strong>${result.production_year_range}</strong></p>` : ''}
+  ${result.year_significance_note ? `
+  <div class="notes-box" style="margin-bottom:10px;">
+    <div style="font-size:0.72rem;color:#6b7280;margin-bottom:4px;">משמעות שנת הייצור</div>
+    ${result.year_significance_note}
+  </div>` : ''}
+  ${result.known_variants_by_year ? `
+  <div class="notes-box">
+    <div style="font-size:0.72rem;color:#6b7280;margin-bottom:4px;">וריאנטים לפי שנה</div>
+    ${result.known_variants_by_year}
+  </div>` : ''}` : ''}
+
   <h2>שווי שוק (USD)</h2>
   <div class="market-grid">
     <div class="market-cell">
@@ -774,6 +788,45 @@ export default function WatchIdentifier() {
               ))}
             </div>
           </div>
+
+          {/* 3c-2. Year & Vintage Significance */}
+          {(result.production_year_range || result.year_significance_note || result.known_variants_by_year) && (
+            <div
+              className="rounded-2xl p-5 space-y-3"
+              style={{ background: CARD_BG, border: '1px solid rgba(212,175,55,0.35)' }}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span style={{ fontSize: 16 }}>🗓️</span>
+                <h3 className="font-semibold text-sm" style={{ color: GOLD }}>שנה ווריאנטים</h3>
+                {result.production_year_range && (
+                  <span
+                    className="text-xs px-2 py-0.5 rounded-full"
+                    style={{ background: 'rgba(212,175,55,0.12)', color: GOLD, border: '1px solid rgba(212,175,55,0.3)' }}
+                  >
+                    {result.production_year_range}
+                  </span>
+                )}
+              </div>
+
+              {result.year_significance_note && (
+                <div className="rounded-xl p-3" style={{ background: '#0d1117' }}>
+                  <p className="text-xs mb-1" style={{ color: '#6b7280' }}>משמעות שנת הייצור</p>
+                  <p className="text-sm leading-relaxed" style={{ color: '#d1d5db' }}>
+                    {result.year_significance_note}
+                  </p>
+                </div>
+              )}
+
+              {result.known_variants_by_year && (
+                <div className="rounded-xl p-3" style={{ background: '#0d1117' }}>
+                  <p className="text-xs mb-1" style={{ color: '#6b7280' }}>וריאנטים ידועים לפי שנה</p>
+                  <p className="text-sm leading-relaxed" style={{ color: '#d1d5db' }}>
+                    {result.known_variants_by_year}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 3d. Investment Analysis */}
           <div

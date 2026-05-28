@@ -50,6 +50,9 @@ export interface WatchResult {
   historical_significance: string
   box_papers_premium: string
   reference_image_url: string | null
+  production_year_range: string | null
+  year_significance_note: string | null
+  known_variants_by_year: string | null
 }
 
 // ─── Cache helpers ─────────────────────────────────────────────────────────────
