@@ -5,9 +5,11 @@ from typing import List, Optional
 from datetime import datetime
 import os
 import uuid
+import io
 import aiofiles
 import shutil
 import httpx
+from PIL import Image as PILImage
 
 from database import get_db
 import models
@@ -377,12 +379,26 @@ async def upload_photos(
     has_primary = any(p.is_primary for p in watch.photos)
 
     for file in files:
-        ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
-        filename = f"{uuid.uuid4()}{ext}"
+        raw_ext = (os.path.splitext(file.filename)[1] if file.filename else ".jpg").lower()
+        content = await file.read()
+
+        # Auto-convert HEIC/HEIF (iPhone format) → JPEG for browser compatibility
+        if raw_ext in (".heic", ".heif") or (file.content_type or "").lower() in ("image/heic", "image/heif"):
+            try:
+                import pillow_heif
+                pillow_heif.register_heif_opener()
+                img = PILImage.open(io.BytesIO(content))
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="JPEG", quality=92)
+                content = buf.getvalue()
+                raw_ext = ".jpg"
+            except Exception as conv_err:
+                print(f"[Photos] HEIC conversion failed: {conv_err} — saving as-is")
+
+        filename = f"{uuid.uuid4()}{raw_ext}"
         filepath = os.path.join(PHOTOS_DIR, filename)
 
         async with aiofiles.open(filepath, 'wb') as f:
-            content = await file.read()
             await f.write(content)
 
         is_primary = not has_primary
