@@ -30,7 +30,7 @@ const conditionLabel: Record<string, string> = { mint: 'מושלם', excellent: 
 export default function WatchDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { rates } = useCurrency()
+  const { rates, selectedCurrency, meta } = useCurrency()
   const [watch, setWatch] = useState<WatchType | null>(null)
   const [loading, setLoading] = useState(true)
   const [photoIdx, setPhotoIdx] = useState(0)
@@ -67,6 +67,33 @@ export default function WatchDetail() {
     if (!currRate) return null
     return amount * (ilsRate / currRate)
   }, [rates])
+
+  /**
+   * Convert an ILS amount to the currently selected display currency.
+   * If selected == purchase currency AND we have the historical rate, use it (exact).
+   * Otherwise fall back to live rates (approximate).
+   */
+  const ilsToSelected = useCallback((
+    ils: number,
+    purchaseCurrency?: string,
+    historicalRate?: number | null,
+  ): string => {
+    if (selectedCurrency === 'ILS') {
+      return `₪${Math.round(ils).toLocaleString('he-IL')}`
+    }
+    const sym = meta[selectedCurrency]?.symbol ?? symOf(selectedCurrency)
+    let amount: number
+    if (selectedCurrency === purchaseCurrency && historicalRate) {
+      // exact: use same historical rate that was used to calculate purchase_price_ils
+      amount = ils / historicalRate
+    } else {
+      // approximate: ILS → USD → selectedCurrency via live rates
+      const ilsPerUSD = rates['ILS'] || 3.73
+      const selPerUSD = rates[selectedCurrency] || 1
+      amount = (ils / ilsPerUSD) * selPerUSD
+    }
+    return `${sym}${Math.round(amount).toLocaleString('en-US')}`
+  }, [rates, selectedCurrency, meta])
 
   const { getRootProps: getPhotoProps, getInputProps: getPhotoInput } = useDropzone({
     accept: { 'image/*': [] },
@@ -334,12 +361,20 @@ export default function WatchDetail() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="text-xs text-gray-500 mb-0.5">מחיר קנייה</div>
-                <div className="text-lg font-bold text-white">
-                  {fmtPrice(watch.purchase_price, watch.price_currency)}
-                </div>
-                {watch.purchase_price_ils != null && (watch.tax_refund || (watch.import_tax ?? 0) > 0) && (
-                  <div className="text-xs mt-0.5" style={{ color: '#d4af37' }}>
-                    נטו: ₪{Math.round(watch.purchase_price_ils).toLocaleString('he-IL')}
+                {watch.purchase_price_ils != null ? (
+                  <>
+                    <div className="text-lg font-bold text-white">
+                      {ilsToSelected(watch.purchase_price_ils, watch.price_currency, watch.purchase_rate_to_ils)}
+                    </div>
+                    {(watch.tax_refund || (watch.import_tax ?? 0) > 0) && (
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        ברוטו: {fmtPrice(watch.purchase_price, watch.price_currency)}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-lg font-bold text-white">
+                    {fmtPrice(watch.purchase_price, watch.price_currency)}
                   </div>
                 )}
               </div>
@@ -398,10 +433,17 @@ export default function WatchDetail() {
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-500">מחיר קנייה בשקלים</span>
-                  <span className="text-base font-bold" style={{ color: '#d4af37' }}>
-                    ₪{Math.round(watch.purchase_price_ils).toLocaleString('he-IL')}
-                  </span>
+                  <span className="text-xs text-gray-500">עלות נטו</span>
+                  <div className="text-right">
+                    <div className="text-base font-bold" style={{ color: '#d4af37' }}>
+                      {ilsToSelected(watch.purchase_price_ils, watch.price_currency, watch.purchase_rate_to_ils)}
+                    </div>
+                    {selectedCurrency !== 'ILS' && (
+                      <div className="text-xs text-gray-500">
+                        ₪{Math.round(watch.purchase_price_ils).toLocaleString('he-IL')}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -503,10 +545,17 @@ export default function WatchDetail() {
                   {/* Net total — always from backend (authoritative, uses historical rates) */}
                   {netILS != null && (
                     <div className="flex items-center justify-between pt-2">
-                      <span className="text-sm font-bold text-white">עלות נטו בשקלים</span>
-                      <span className="text-base font-bold" style={{ color: '#d4af37' }}>
-                        ₪{Math.round(netILS).toLocaleString('he-IL')}
-                      </span>
+                      <span className="text-sm font-bold text-white">עלות נטו</span>
+                      <div className="text-right">
+                        <div className="text-base font-bold" style={{ color: '#d4af37' }}>
+                          {ilsToSelected(netILS, watch.price_currency, histRate ?? undefined)}
+                        </div>
+                        {selectedCurrency !== 'ILS' && (
+                          <div className="text-xs text-gray-500">
+                            ₪{Math.round(netILS).toLocaleString('he-IL')}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
 
